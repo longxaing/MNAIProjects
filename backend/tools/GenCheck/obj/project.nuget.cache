@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "XqroxijvRoo=",
+  "success": true,
+  "projectFilePath": "C:\\src\\MNAIProjects\\backend\\tools\\GenCheck\\GenCheck.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\hongensun\\.nuget\\packages\\documentformat.openxml\\3.5.1\\documentformat.openxml.3.5.1.nupkg.sha512",
+    "C:\\Users\\hongensun\\.nuget\\packages\\documentformat.openxml.framework\\3.5.1\\documentformat.openxml.framework.3.5.1.nupkg.sha512",
+    "C:\\Users\\hongensun\\.nuget\\packages\\system.io.packaging\\8.0.1\\system.io.packaging.8.0.1.nupkg.sha512"
+  ],
+  "logs": []
+}

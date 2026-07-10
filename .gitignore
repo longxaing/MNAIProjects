@@ -1,0 +1,21 @@
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+secrets.json
+
+# Node / Vite
+node_modules/
+dist/
+.env.local
+*.local
+
+# Generator sample output
+backend/tools/GenCheck/sample.pptx
+backend/tools/GenCheck/sample.docx
+
+# IDE / OS
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
