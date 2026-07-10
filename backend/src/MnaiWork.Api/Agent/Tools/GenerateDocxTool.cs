@@ -81,7 +81,8 @@ public sealed class GenerateDocxTool : IAgentTool
         {
             var bytes = _generator.Generate(spec);
             var fileName = EnsureExtension(spec.Title, ".docx");
-            var artifact = await _storage.UploadAsync(fileName, ArtifactKind.Docx, bytes, DocxContentType, ct);
+            var owner = new ArtifactOwner(context.UserId, context.ThreadId);
+            var artifact = await _storage.UploadAsync(owner, fileName, ArtifactKind.Docx, bytes, DocxContentType, ct);
 
             return ToolResult.Ok(
                 $"Generated document \"{artifact.FileName}\" with {spec.Blocks.Count} block(s), " +

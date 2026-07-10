@@ -87,7 +87,7 @@ public sealed class DocxGenerator
                     new SpacingBetweenLines { After = "120" })));
                 break;
             default: // paragraph
-                body.AppendChild(StyledParagraph(block.Text ?? "", 11, theme.ContentInk, false, 40, 120, theme.BodyFont));
+                body.AppendChild(StyledParagraph(block.Text ?? "", 11, theme.ContentInk, false, 40, 120, theme.BodyFont, justify: true));
                 break;
         }
     }
@@ -97,10 +97,15 @@ public sealed class DocxGenerator
     // -------------------------------------------------------------------
 
     private static Paragraph StyledParagraph(string text, int sizePt, string colorHex, bool bold,
-        int before, int after, string font)
+        int before, int after, string font, bool justify = false)
     {
         var props = new ParagraphProperties(
             new SpacingBetweenLines { Before = before.ToString(), After = after.ToString(), Line = "276", LineRule = LineSpacingRuleValues.Auto });
+        if (justify)
+        {
+            // Justify body prose so the right edge is even and long lines look tidy.
+            props.AppendChild(new Justification { Val = JustificationValues.Both });
+        }
 
         var run = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
         run.RunProperties = RunProps(sizePt, colorHex, bold, font);
@@ -294,6 +299,7 @@ public sealed class DocxGenerator
     {
         body.AppendChild(new SectionProperties(
             new PageSize { Width = 12240U, Height = 15840U },
-            new PageMargin { Top = 1440, Right = 1440U, Bottom = 1440, Left = 1440U, Header = 720U, Footer = 720U, Gutter = 0U }));
+            // Wider side margins (1.25") shorten each line so long paragraphs read more comfortably.
+            new PageMargin { Top = 1440, Right = 1800U, Bottom = 1440, Left = 1800U, Header = 720U, Footer = 720U, Gutter = 0U }));
     }
 }

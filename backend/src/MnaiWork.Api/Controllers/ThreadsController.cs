@@ -2,6 +2,7 @@ using MnaiWork.Api.Agent;
 using MnaiWork.Api.Data;
 using MnaiWork.Api.Infrastructure;
 using MnaiWork.Api.Models;
+using MnaiWork.Api.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,6 +16,7 @@ public sealed class ThreadsController : ControllerBase
     private readonly IThreadRepository _threads;
     private readonly IMessageRepository _messages;
     private readonly IRunRepository _runs;
+    private readonly IFileStorage _storage;
     private readonly IAgentRunQueue _queue;
     private readonly ICurrentUser _me;
 
@@ -22,12 +24,14 @@ public sealed class ThreadsController : ControllerBase
         IThreadRepository threads,
         IMessageRepository messages,
         IRunRepository runs,
+        IFileStorage storage,
         IAgentRunQueue queue,
         ICurrentUser me)
     {
         _threads = threads;
         _messages = messages;
         _runs = runs;
+        _storage = storage;
         _queue = queue;
         _me = me;
     }
@@ -62,8 +66,39 @@ public sealed class ThreadsController : ControllerBase
         {
             return NotFound();
         }
+
+        // Cascade: remove the generated files and all child records, then the thread itself.
+        await _storage.DeleteThreadFilesAsync(new ArtifactOwner(_me.Id, threadId), ct);
+        await _messages.DeleteByThreadAsync(threadId, ct);
+        await _runs.DeleteByThreadAsync(threadId, ct);
         await _threads.DeleteAsync(_me.Id, threadId, ct);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Mints a fresh download URL for an artifact. The link is generated on demand (not stored),
+    /// so it never goes stale, and access is scoped to the caller's own thread.
+    /// </summary>
+    [HttpGet("{threadId}/artifacts/{artifactId}/download")]
+    public async Task<ActionResult<object>> GetArtifactDownloadUrl(string threadId, string artifactId, CancellationToken ct)
+    {
+        var thread = await _threads.GetAsync(_me.Id, threadId, ct);
+        if (thread is null)
+        {
+            return NotFound();
+        }
+
+        // Ownership: the artifact must belong to a message in this (user-owned) thread.
+        var messages = await _messages.ListAsync(threadId, ct);
+        var artifact = messages.SelectMany(m => m.Artifacts)
+            .FirstOrDefault(a => string.Equals(a.Id, artifactId, StringComparison.OrdinalIgnoreCase));
+        if (artifact is null)
+        {
+            return NotFound();
+        }
+
+        var url = await _storage.GetDownloadUrlAsync(artifact.BlobPath, artifact.FileName, ct);
+        return Ok(new { url });
     }
 
     [HttpGet("{threadId}/messages")]

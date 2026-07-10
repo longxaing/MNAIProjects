@@ -38,6 +38,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /**
+   * Get-or-create the current user. Called right after sign-in so the backend
+   * records the user (first login) and refreshes last-seen on return visits.
+   */
+  getMe: () => request<unknown>("/api/users/me"),
+
   listThreads: () => request<ThreadListItem[]>("/api/threads"),
 
   createThread: (title?: string) =>
@@ -102,7 +108,16 @@ export async function streamRun(
   }
 }
 
-export async function downloadArtifact(url: string, fileName: string): Promise<void> {
+export async function downloadArtifact(
+  threadId: string,
+  artifactId: string,
+  fileName: string
+): Promise<void> {
+  // Ask the backend to mint a fresh download URL on demand (never stored, never stale).
+  const { url } = await request<{ url: string }>(
+    `/api/threads/${threadId}/artifacts/${artifactId}/download`
+  );
+
   // Absolute SAS links can be opened directly; relative proxy routes need auth.
   if (/^https?:\/\//i.test(url)) {
     window.open(url, "_blank", "noopener");

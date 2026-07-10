@@ -7,7 +7,10 @@ import {
 // Azure AD app registration (non-secret IDs, safe to keep in source).
 // Two-app setup: the SPA app is used for sign-in; tokens are requested for the API app's scope.
 const AAD_SPA_CLIENT_ID = "34352002-2bb3-4071-869d-512d550c749e";
-const AAD_TENANT_ID = "15f82502-c999-4482-bc42-64838684ecb8";
+// The app registration supports "all Microsoft account users" (multitenant + MSA), so the
+// sign-in authority must be a shared endpoint ("common") rather than a single tenant id,
+// otherwise personal/other-tenant accounts fail with AADSTS50020.
+const AAD_TENANT_ID = "common";
 const AAD_API_SCOPE = "api://460d1cac-4151-40a5-8c60-d6fc3d53c4ea/access_as_user";
 
 // Env vars override the defaults (e.g. set VITE_AAD_CLIENT_ID="" to force local dev mode).

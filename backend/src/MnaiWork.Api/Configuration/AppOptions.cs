@@ -51,6 +51,7 @@ public sealed class CosmosOptions
     public string ThreadsContainer { get; set; } = "threads";
     public string MessagesContainer { get; set; } = "messages";
     public string RunsContainer { get; set; } = "runs";
+    public string UsersContainer { get; set; } = "users";
 }
 
 /// <summary>Azure Blob Storage settings for generated artifacts.</summary>

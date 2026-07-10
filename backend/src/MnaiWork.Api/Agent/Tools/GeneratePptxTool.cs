@@ -92,7 +92,8 @@ public sealed class GeneratePptxTool : IAgentTool
         {
             var bytes = _generator.Generate(spec);
             var fileName = EnsureExtension(spec.Title, ".pptx");
-            var artifact = await _storage.UploadAsync(fileName, ArtifactKind.Pptx, bytes, PptxContentType, ct);
+            var owner = new ArtifactOwner(context.UserId, context.ThreadId);
+            var artifact = await _storage.UploadAsync(owner, fileName, ArtifactKind.Pptx, bytes, PptxContentType, ct);
 
             return ToolResult.Ok(
                 $"Generated presentation \"{artifact.FileName}\" with {spec.Slides.Count} slide(s), " +

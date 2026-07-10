@@ -84,6 +84,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddScoped<IThreadRepository, ThreadRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IRunRepository, RunRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
 builder.Services.AddSingleton<PptxGenerator>();
@@ -91,6 +92,8 @@ builder.Services.AddSingleton<DocxGenerator>();
 
 builder.Services.AddSingleton<IAgentTool, GeneratePptxTool>();
 builder.Services.AddSingleton<IAgentTool, GenerateDocxTool>();
+builder.Services.AddSingleton<IAgentTool, ListMyFilesTool>();
+builder.Services.AddSingleton<IAgentTool, ReadMyFileTool>();
 builder.Services.AddSingleton<ToolRegistry>();
 
 builder.Services.AddSingleton<IAgentEventBus, AgentEventBus>();
@@ -111,6 +114,24 @@ if (useAzureAd)
 {
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddMicrosoftIdentityWebApi(azureAd);
+
+    // Multi-tenant + personal accounts (authority "common"): tokens come from many issuers
+    // (each tenant + the MSA tenant), so accept any Microsoft issuer instead of a single one.
+    // Security still holds via signature + audience (aud must match this API).
+    builder.Services.Configure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+    {
+        options.TokenValidationParameters.ValidateIssuer = false;
+
+        // v2.0 access tokens carry the bare client id as `aud`, while v1.0 carry "api://<id>".
+        // Accept both so either token version validates.
+        var clientId = azureAd["ClientId"];
+        var appIdUri = azureAd["Audience"];
+        var audiences = new[] { clientId, appIdUri, $"api://{clientId}" }
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct()
+            .ToArray();
+        options.TokenValidationParameters.ValidAudiences = audiences;
+    });
 }
 else
 {

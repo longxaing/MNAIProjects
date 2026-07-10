@@ -1,7 +1,10 @@
 import type { Message } from "../api/types";
+import { useChat } from "../store/chat";
 import ArtifactCard from "./ArtifactCard";
 
 export default function MessageItem({ message }: { message: Message }) {
+  const threadId = useChat((s) => s.currentThreadId) ?? message.threadId;
+
   if (message.role === "tool") {
     if (message.artifacts.length === 0) return null;
     return (
@@ -9,7 +12,7 @@ export default function MessageItem({ message }: { message: Message }) {
         <div className="avatar bot">MW</div>
         <div className="bubble tool-bubble">
           {message.artifacts.map((a) => (
-            <ArtifactCard key={a.id} artifact={a} />
+            <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
           ))}
         </div>
       </div>
@@ -21,16 +24,36 @@ export default function MessageItem({ message }: { message: Message }) {
   }
 
   const isUser = message.role === "user";
+
+  // Skip empty assistant turns (e.g. a round that only issued a tool call and produced
+  // no text): once finished with no content and no artifacts there is nothing to show.
+  if (
+    !isUser &&
+    !message.streaming &&
+    message.content.trim().length === 0 &&
+    message.artifacts.length === 0
+  ) {
+    return null;
+  }
+
   return (
     <div className={`row ${isUser ? "user" : "assistant"}`}>
       {!isUser && <div className="avatar bot">MW</div>}
       <div className={`bubble ${isUser ? "user-bubble" : "assistant-bubble"}`}>
         <div className="content">
           {message.content}
-          {message.streaming && <span className="caret" />}
+          {message.streaming && message.content.length === 0 ? (
+            <span className="typing">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+          ) : (
+            message.streaming && <span className="caret" />
+          )}
         </div>
         {message.artifacts.map((a) => (
-          <ArtifactCard key={a.id} artifact={a} />
+          <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
         ))}
       </div>
       {isUser && <div className="avatar me">You</div>}

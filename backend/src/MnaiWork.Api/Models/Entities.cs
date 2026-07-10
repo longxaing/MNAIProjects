@@ -25,6 +25,55 @@ public enum ArtifactKind
     Pptx
 }
 
+/// <summary>Per-user quota / throttling rules (inspired by Societas' throttle_rule).</summary>
+public sealed class UserQuota
+{
+    /// <summary>Max agent runs a user may start per UTC day. 0 = unlimited.</summary>
+    [JsonPropertyName("dailyRunLimit")]
+    public int DailyRunLimit { get; set; }
+
+    /// <summary>Max concurrently active runs. 0 = unlimited.</summary>
+    [JsonPropertyName("maxConcurrentRuns")]
+    public int MaxConcurrentRuns { get; set; }
+}
+
+/// <summary>
+/// A user account. Partitioned by <see cref="Id"/> (the stable Entra ID object id / SUID),
+/// so a point-read by user id is a single-partition lookup. Created on first sign-in.
+/// </summary>
+public sealed class User
+{
+    /// <summary>Stable user id — the Entra ID <c>oid</c> (object id). Also the partition key.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Entra ID tenant id the user signed in from.</summary>
+    [JsonPropertyName("tenantId")]
+    public string? TenantId { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+
+    /// <summary>True for personal Microsoft accounts (MSA), false for organizational (AAD).</summary>
+    [JsonPropertyName("personalAccount")]
+    public bool PersonalAccount { get; set; }
+
+    [JsonPropertyName("quota")]
+    public UserQuota Quota { get; set; } = new();
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updatedAt")]
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("lastSeenAt")]
+    public DateTimeOffset LastSeenAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>A conversation. Partitioned by <see cref="UserId"/>.</summary>
 public sealed class ChatThread
 {
@@ -58,9 +107,6 @@ public sealed class Artifact
 
     [JsonPropertyName("blobPath")]
     public string BlobPath { get; set; } = string.Empty;
-
-    [JsonPropertyName("downloadUrl")]
-    public string DownloadUrl { get; set; } = string.Empty;
 
     [JsonPropertyName("sizeBytes")]
     public long SizeBytes { get; set; }

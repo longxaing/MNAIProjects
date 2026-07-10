@@ -1,7 +1,13 @@
 import { downloadArtifact } from "../api/client";
 import type { Artifact } from "../api/types";
 
-export default function ArtifactCard({ artifact }: { artifact: Artifact }) {
+export default function ArtifactCard({
+  artifact,
+  threadId
+}: {
+  artifact: Artifact;
+  threadId: string;
+}) {
   const kb = Math.max(1, Math.round(artifact.sizeBytes / 1024));
   return (
     <div className="artifact">
@@ -14,7 +20,7 @@ export default function ArtifactCard({ artifact }: { artifact: Artifact }) {
       </div>
       <button
         className="artifact-dl"
-        onClick={() => void downloadArtifact(artifact.downloadUrl, artifact.fileName)}
+        onClick={() => void downloadArtifact(threadId, artifact.id, artifact.fileName)}
       >
         Download
       </button>

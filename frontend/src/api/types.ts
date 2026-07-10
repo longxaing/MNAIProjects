@@ -5,7 +5,6 @@ export interface Artifact {
   kind: "docx" | "pptx";
   fileName: string;
   blobPath: string;
-  downloadUrl: string;
   sizeBytes: number;
   createdAt: string;
 }

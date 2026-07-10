@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace MnaiWork.Api.Data;
 
 /// <summary>
-/// Owns the <see cref="CosmosClient"/> and exposes the three containers used by the app.
+/// Owns the <see cref="CosmosClient"/> and exposes the containers used by the app.
 /// Also creates the database/containers on first run.
 /// </summary>
 public sealed class CosmosContext
@@ -19,12 +19,14 @@ public sealed class CosmosContext
         Threads = client.GetContainer(_options.Database, _options.ThreadsContainer);
         Messages = client.GetContainer(_options.Database, _options.MessagesContainer);
         Runs = client.GetContainer(_options.Database, _options.RunsContainer);
+        Users = client.GetContainer(_options.Database, _options.UsersContainer);
     }
 
     public CosmosClient Client { get; }
     public Container Threads { get; }
     public Container Messages { get; }
     public Container Runs { get; }
+    public Container Users { get; }
 
     /// <summary>Ensures database and containers exist. Safe to call at startup.</summary>
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -33,5 +35,6 @@ public sealed class CosmosContext
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.ThreadsContainer, "/userId"), cancellationToken: ct);
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.MessagesContainer, "/threadId"), cancellationToken: ct);
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.RunsContainer, "/threadId"), cancellationToken: ct);
+        await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.UsersContainer, "/id"), cancellationToken: ct);
     }
 }

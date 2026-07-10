@@ -9,9 +9,19 @@ namespace MnaiWork.Api.Storage;
 
 public interface IFileStorage
 {
-    Task<Artifact> UploadAsync(string fileName, ArtifactKind kind, byte[] content, string contentType, CancellationToken ct = default);
+    Task<Artifact> UploadAsync(ArtifactOwner owner, string fileName, ArtifactKind kind, byte[] content,
+        string contentType, CancellationToken ct = default);
     Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(string blobPath, CancellationToken ct = default);
+
+    /// <summary>Mints a fresh, time-limited download URL for a stored blob (generated on demand).</summary>
+    Task<string> GetDownloadUrlAsync(string blobPath, string fileName, CancellationToken ct = default);
+
+    /// <summary>Deletes every blob under a thread's folder (<c>{userId}/{threadId}/</c>).</summary>
+    Task DeleteThreadFilesAsync(ArtifactOwner owner, CancellationToken ct = default);
 }
+
+/// <summary>Identifies who a stored artifact belongs to, used to build a meaningful blob path.</summary>
+public sealed record ArtifactOwner(string UserId, string ThreadId);
 
 /// <summary>Stores generated documents in Azure Blob Storage and hands out time-limited download links.</summary>
 public sealed class BlobFileStorage : IFileStorage
@@ -38,12 +48,16 @@ public sealed class BlobFileStorage : IFileStorage
         }
     }
 
-    public async Task<Artifact> UploadAsync(string fileName, ArtifactKind kind, byte[] content, string contentType, CancellationToken ct = default)
+    public async Task<Artifact> UploadAsync(ArtifactOwner owner, string fileName, ArtifactKind kind, byte[] content,
+        string contentType, CancellationToken ct = default)
     {
         await EnsureContainerAsync(ct);
 
         var safeName = SanitizeFileName(fileName);
-        var blobName = $"{DateTime.UtcNow:yyyy/MM/dd}/{Guid.NewGuid():N}/{safeName}";
+        // Path is organized by owner: {userId}/{threadId}/{shortId}-{fileName}. The short id keeps
+        // names unique within a thread without a full GUID folder per file.
+        var shortId = Guid.NewGuid().ToString("N")[..8];
+        var blobName = $"{Segment(owner.UserId)}/{Segment(owner.ThreadId)}/{shortId}-{safeName}";
         var blob = _container.GetBlobClient(blobName);
 
         using var ms = new MemoryStream(content, writable: false);
@@ -52,14 +66,11 @@ public sealed class BlobFileStorage : IFileStorage
             HttpHeaders = new BlobHttpHeaders { ContentType = contentType }
         }, ct);
 
-        var url = await GenerateDownloadUrlAsync(blob, safeName, ct);
-
         return new Artifact
         {
             Kind = kind,
             FileName = safeName,
             BlobPath = blobName,
-            DownloadUrl = url,
             SizeBytes = content.LongLength
         };
     }
@@ -78,6 +89,30 @@ public sealed class BlobFileStorage : IFileStorage
         return (stream, props.Value.ContentType ?? "application/octet-stream", fileName);
     }
 
+    public async Task DeleteThreadFilesAsync(ArtifactOwner owner, CancellationToken ct = default)
+    {
+        var prefix = $"{Segment(owner.UserId)}/{Segment(owner.ThreadId)}/";
+        try
+        {
+            await foreach (var item in _container.GetBlobsAsync(
+                BlobTraits.None, BlobStates.None, prefix, ct).ConfigureAwait(false))
+            {
+                await _container.DeleteBlobIfExistsAsync(item.Name, cancellationToken: ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: a failed blob cleanup shouldn't block deleting the conversation.
+            _logger.LogWarning(ex, "Failed to delete blobs under {Prefix}.", prefix);
+        }
+    }
+
+    public Task<string> GetDownloadUrlAsync(string blobPath, string fileName, CancellationToken ct = default)
+    {
+        var blob = _container.GetBlobClient(blobPath);
+        return GenerateDownloadUrlAsync(blob, fileName, ct);
+    }
+
     private async Task<string> GenerateDownloadUrlAsync(BlobClient blob, string fileName, CancellationToken ct)
     {
         var expiry = DateTimeOffset.UtcNow.AddMinutes(_options.DownloadLinkTtlMinutes);
@@ -87,7 +122,7 @@ public sealed class BlobFileStorage : IFileStorage
             BlobName = blob.Name,
             Resource = "b",
             ExpiresOn = expiry,
-            ContentDisposition = $"attachment; filename=\"{fileName}\""
+            ContentDisposition = BuildContentDisposition(fileName)
         };
         sas.SetPermissions(BlobSasPermissions.Read);
 
@@ -121,5 +156,31 @@ public sealed class BlobFileStorage : IFileStorage
         var invalid = Path.GetInvalidFileNameChars();
         var cleaned = new string(fileName.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
         return string.IsNullOrWhiteSpace(cleaned) ? "document" : cleaned;
+    }
+
+    /// <summary>Sanitizes a value for use as a single blob path segment (no slashes, safe chars).</summary>
+    private static string Segment(string value)
+    {
+        var cleaned = new string((value ?? string.Empty)
+            .Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+        return string.IsNullOrEmpty(cleaned) ? "unknown" : cleaned;
+    }
+
+    /// <summary>
+    /// Builds a Content-Disposition value that is safe for the SAS query string. Non-ASCII file
+    /// names (e.g. Chinese) must use RFC 5987 <c>filename*=UTF-8''...</c> with percent-encoding,
+    /// and are also given an ASCII <c>filename</c> fallback.
+    /// </summary>
+    private static string BuildContentDisposition(string fileName)
+    {
+        var isAscii = fileName.All(c => c < 128);
+        if (isAscii)
+        {
+            return $"attachment; filename=\"{fileName}\"";
+        }
+
+        var encoded = Uri.EscapeDataString(fileName);
+        var asciiFallback = new string(fileName.Select(c => c < 128 ? c : '_').ToArray());
+        return $"attachment; filename=\"{asciiFallback}\"; filename*=UTF-8''{encoded}";
     }
 }
