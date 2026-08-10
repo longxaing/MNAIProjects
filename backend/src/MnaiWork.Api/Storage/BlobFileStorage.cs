@@ -11,6 +11,14 @@ public interface IFileStorage
 {
     Task<Artifact> UploadAsync(ArtifactOwner owner, string fileName, ArtifactKind kind, byte[] content,
         string contentType, CancellationToken ct = default);
+
+    /// <summary>Stores a user-uploaded file under the thread's uploads folder.</summary>
+    Task<Attachment> UploadUserFileAsync(ArtifactOwner owner, string fileName, AttachmentKind kind, byte[] content,
+        string contentType, CancellationToken ct = default);
+
+    /// <summary>Reads a blob's raw bytes. Returns null if it does not exist.</summary>
+    Task<byte[]?> ReadBytesAsync(string blobPath, CancellationToken ct = default);
+
     Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(string blobPath, CancellationToken ct = default);
 
     /// <summary>Mints a fresh, time-limited download URL for a stored blob (generated on demand).</summary>
@@ -73,6 +81,45 @@ public sealed class BlobFileStorage : IFileStorage
             BlobPath = blobName,
             SizeBytes = content.LongLength
         };
+    }
+
+    public async Task<Attachment> UploadUserFileAsync(ArtifactOwner owner, string fileName, AttachmentKind kind,
+        byte[] content, string contentType, CancellationToken ct = default)
+    {
+        await EnsureContainerAsync(ct);
+
+        var safeName = SanitizeFileName(fileName);
+        var shortId = Guid.NewGuid().ToString("N")[..8];
+        // Uploads live in a dedicated subfolder so they never collide with generated artifacts.
+        var blobName = $"{Segment(owner.UserId)}/{Segment(owner.ThreadId)}/uploads/{shortId}-{safeName}";
+        var blob = _container.GetBlobClient(blobName);
+
+        using var ms = new MemoryStream(content, writable: false);
+        await blob.UploadAsync(ms, new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders { ContentType = contentType }
+        }, ct);
+
+        return new Attachment
+        {
+            Kind = kind,
+            FileName = safeName,
+            BlobPath = blobName,
+            ContentType = contentType,
+            SizeBytes = content.LongLength
+        };
+    }
+
+    public async Task<byte[]?> ReadBytesAsync(string blobPath, CancellationToken ct = default)
+    {
+        var blob = _container.GetBlobClient(blobPath);
+        if (!await blob.ExistsAsync(ct))
+        {
+            return null;
+        }
+        using var ms = new MemoryStream();
+        await blob.DownloadToAsync(ms, ct);
+        return ms.ToArray();
     }
 
     public async Task<(Stream Stream, string ContentType, string FileName)?> OpenReadAsync(string blobPath, CancellationToken ct = default)

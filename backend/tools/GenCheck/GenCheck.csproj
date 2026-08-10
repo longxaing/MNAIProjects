@@ -15,6 +15,8 @@
   <!-- Reuse the real generators without pulling in the web project. -->
   <ItemGroup>
     <Compile Include="..\..\src\MnaiWork.Api\Generation\Specs.cs" />
+    <Compile Include="..\..\src\MnaiWork.Api\Generation\ImageDimensions.cs" />
+    <Compile Include="..\..\src\MnaiWork.Api\Generation\ChartXml.cs" />
     <Compile Include="..\..\src\MnaiWork.Api\Generation\PptxGenerator.cs" />
     <Compile Include="..\..\src\MnaiWork.Api\Generation\DocxGenerator.cs" />
   </ItemGroup>

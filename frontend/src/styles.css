@@ -604,6 +604,104 @@ button {
   margin: 0 auto;
 }
 
+.composer-wrap {
+  width: 100%;
+}
+
+.attach-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 908px;
+  margin: 0 auto;
+  padding: 10px 24px 0;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 6px 8px 6px 10px;
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.attach-chip.uploading {
+  color: var(--muted);
+  padding: 6px 12px;
+}
+
+.attach-ico {
+  flex: 0 0 auto;
+}
+
+.attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-x {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 6px;
+}
+
+.attach-x:hover {
+  color: var(--danger);
+}
+
+.attach-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 12px;
+  font-size: 22px;
+  line-height: 1;
+  transition: border-color 0.15s;
+}
+
+.attach-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+
+.attach-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.msg-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.user-bubble .msg-attachment {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .composer textarea {
   flex: 1;
   resize: none;

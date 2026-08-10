@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api, streamRun } from "../api/client";
-import type { AgentEvent, Artifact, Message, ThreadListItem } from "../api/types";
+import type { AgentEvent, Artifact, Attachment, Message, ThreadListItem } from "../api/types";
 
 interface ChatState {
   threads: ThreadListItem[];
@@ -9,6 +9,8 @@ interface ChatState {
   sending: boolean;
   toolActivity: string | null;
   error: string | null;
+  pendingAttachments: Attachment[];
+  uploading: boolean;
 
   init: () => Promise<void>;
   refreshThreads: () => Promise<void>;
@@ -16,6 +18,8 @@ interface ChatState {
   newThread: () => void;
   deleteThread: (threadId: string) => Promise<void>;
   send: (content: string) => Promise<void>;
+  uploadFiles: (files: FileList | File[]) => Promise<void>;
+  removePendingAttachment: (id: string) => void;
   dismissError: () => void;
 }
 
@@ -37,6 +41,7 @@ export const useChat = create<ChatState>((set, get) => {
           content: "",
           sequence: get().messages.length + 1,
           artifacts: [],
+          attachments: [],
           streaming: true,
           createdAt: nowIso(),
           updatedAt: nowIso()
@@ -101,6 +106,7 @@ export const useChat = create<ChatState>((set, get) => {
       content: "",
       sequence: messages.length + 1,
       artifacts: [artifact],
+      attachments: [],
       createdAt: nowIso(),
       updatedAt: nowIso()
     };
@@ -114,6 +120,8 @@ export const useChat = create<ChatState>((set, get) => {
     sending: false,
     toolActivity: null,
     error: null,
+    pendingAttachments: [],
+    uploading: false,
 
     async init() {
       await get().refreshThreads();
@@ -135,7 +143,7 @@ export const useChat = create<ChatState>((set, get) => {
 
     newThread() {
       streamController?.abort();
-      set({ currentThreadId: null, messages: [], error: null, toolActivity: null });
+      set({ currentThreadId: null, messages: [], error: null, toolActivity: null, pendingAttachments: [] });
     },
 
     async deleteThread(threadId: string) {
@@ -148,9 +156,42 @@ export const useChat = create<ChatState>((set, get) => {
       }
     },
 
+    async uploadFiles(files: FileList | File[]) {
+      const list = Array.from(files);
+      if (list.length === 0 || get().uploading) return;
+
+      // Uploads need a thread to attach to; create one lazily.
+      let threadId = get().currentThreadId;
+      if (!threadId) {
+        const thread = await api.createThread();
+        set({
+          currentThreadId: thread.id,
+          threads: [{ id: thread.id, title: thread.title, updatedAt: thread.updatedAt }, ...get().threads]
+        });
+        threadId = thread.id;
+      }
+
+      set({ uploading: true, error: null });
+      try {
+        for (const file of list) {
+          const att = await api.uploadFile(threadId, file);
+          set({ pendingAttachments: [...get().pendingAttachments, att] });
+        }
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : "Failed to upload the file." });
+      } finally {
+        set({ uploading: false });
+      }
+    },
+
+    removePendingAttachment(id: string) {
+      set({ pendingAttachments: get().pendingAttachments.filter((a) => a.id !== id) });
+    },
+
     async send(content: string) {
       const trimmed = content.trim();
-      if (!trimmed || get().sending) return;
+      const attachments = get().pendingAttachments;
+      if ((!trimmed && attachments.length === 0) || get().sending) return;
 
       let threadId = get().currentThreadId;
       if (!threadId) {
@@ -169,17 +210,24 @@ export const useChat = create<ChatState>((set, get) => {
         content: trimmed,
         sequence: get().messages.length + 1,
         artifacts: [],
+        attachments,
         createdAt: nowIso(),
         updatedAt: nowIso()
       };
-      set({ messages: [...get().messages, optimistic], sending: true, error: null, toolActivity: null });
+      set({
+        messages: [...get().messages, optimistic],
+        sending: true,
+        error: null,
+        toolActivity: null,
+        pendingAttachments: []
+      });
 
       streamController?.abort();
       const controller = new AbortController();
       streamController = controller;
 
       try {
-        const { runId } = await api.sendMessage(threadId, trimmed);
+        const { runId } = await api.sendMessage(threadId, trimmed, attachments);
         await streamRun(threadId, runId, apply, controller.signal);
       } catch (err) {
         if (!controller.signal.aborted) {

@@ -103,10 +103,23 @@ public sealed class ContextManager
         }
     }
 
-    private static ResponseItem ToInputItem(ChatMessage message) =>
-        message.Role == MessageRole.User
-            ? ResponseItem.CreateUserMessageItem(message.Content)
-            : ResponseItem.CreateAssistantMessageItem(message.Content);
+    private static ResponseItem ToInputItem(ChatMessage message)
+    {
+        var text = message.Content;
+        if (message.Role == MessageRole.User && message.Attachments.Count > 0)
+        {
+            // Make uploaded files discoverable to the model: list id, kind and name so it can call
+            // read_attachment (for docs) or reference imageId (for images) in the generate tools.
+            var lines = message.Attachments.Select(a =>
+                $"  - id={a.Id} | kind={a.Kind.ToString().ToLowerInvariant()} | name={a.FileName}");
+            var note = "[Attached files]\n" + string.Join("\n", lines);
+            text = string.IsNullOrWhiteSpace(text) ? note : $"{text}\n\n{note}";
+        }
+
+        return message.Role == MessageRole.User
+            ? ResponseItem.CreateUserMessageItem(text)
+            : ResponseItem.CreateAssistantMessageItem(text);
+    }
 
     // Accurate token counting via the o200k_base BPE encoder (used by the gpt-4o / gpt-5 family),
     // so budgeting is correct for Chinese, code and mixed text — not just English prose.

@@ -117,9 +117,10 @@ public sealed class ThreadsController : ControllerBase
     public async Task<ActionResult<SendMessageResponse>> Send(
         string threadId, [FromBody] SendMessageRequest request, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(request.Content))
+        var hasAttachments = request.Attachments is { Count: > 0 };
+        if (string.IsNullOrWhiteSpace(request.Content) && !hasAttachments)
         {
-            return BadRequest("Message content is required.");
+            return BadRequest("Message content or an attachment is required.");
         }
 
         var thread = await _threads.GetAsync(_me.Id, threadId, ct);
@@ -128,19 +129,29 @@ public sealed class ThreadsController : ControllerBase
             return NotFound();
         }
 
+        // Only trust attachments whose blob path lives under this user's thread uploads folder.
+        var uploadPrefix = $"{Sanitize(_me.Id)}/{Sanitize(threadId)}/uploads/";
+        var attachments = (request.Attachments ?? new List<Attachment>())
+            .Where(a => a.BlobPath.StartsWith(uploadPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         var sequence = await _messages.GetNextSequenceAsync(threadId, ct);
         var userMessage = new ChatMessage
         {
             ThreadId = threadId,
             Role = MessageRole.User,
             Content = request.Content.Trim(),
-            Sequence = sequence
+            Sequence = sequence,
+            Attachments = attachments
         };
         await _messages.AddAsync(userMessage, ct);
 
         if (thread.Title == "New conversation")
         {
-            thread.Title = Truncate(userMessage.Content, 60);
+            var title = string.IsNullOrWhiteSpace(userMessage.Content)
+                ? (attachments.FirstOrDefault()?.FileName ?? "New conversation")
+                : userMessage.Content;
+            thread.Title = Truncate(title, 60);
         }
         await _threads.UpsertAsync(thread, ct);
 
@@ -149,6 +160,60 @@ public sealed class ThreadsController : ControllerBase
         await _queue.EnqueueAsync(new AgentRunRequest(run.Id, threadId, _me.Id), ct);
 
         return Ok(new SendMessageResponse(run.Id, threadId, userMessage.Id));
+    }
+
+    /// <summary>Uploads a file (image / pdf / docx / pptx) to this thread. Returns attachment metadata.</summary>
+    [HttpPost("{threadId}/uploads")]
+    [RequestSizeLimit(30_000_000)]
+    public async Task<ActionResult<Attachment>> Upload(string threadId, IFormFile file, CancellationToken ct)
+    {
+        var thread = await _threads.GetAsync(_me.Id, threadId, ct);
+        if (thread is null)
+        {
+            return NotFound();
+        }
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("A non-empty file is required.");
+        }
+        if (file.Length > 30_000_000)
+        {
+            return BadRequest("File is too large (max 30 MB).");
+        }
+
+        var kind = ClassifyAttachment(file.FileName, file.ContentType);
+        if (kind == AttachmentKind.Other)
+        {
+            return BadRequest("Unsupported file type. Allowed: images, PDF, DOCX, PPTX.");
+        }
+
+        await using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct);
+        var bytes = ms.ToArray();
+
+        var owner = new ArtifactOwner(_me.Id, threadId);
+        var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        var attachment = await _storage.UploadUserFileAsync(owner, file.FileName, kind, bytes, contentType, ct);
+        return Ok(attachment);
+    }
+
+    private static AttachmentKind ClassifyAttachment(string fileName, string? contentType)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        var ct = (contentType ?? string.Empty).ToLowerInvariant();
+        if (ct.StartsWith("image/") || ext is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp")
+            return AttachmentKind.Image;
+        if (ct == "application/pdf" || ext == ".pdf") return AttachmentKind.Pdf;
+        if (ext == ".docx" || ct.Contains("wordprocessingml")) return AttachmentKind.Docx;
+        if (ext == ".pptx" || ct.Contains("presentationml")) return AttachmentKind.Pptx;
+        return AttachmentKind.Other;
+    }
+
+    private static string Sanitize(string value)
+    {
+        var cleaned = new string((value ?? string.Empty)
+            .Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+        return string.IsNullOrEmpty(cleaned) ? "unknown" : cleaned;
     }
 
     private static string Truncate(string value, int max)

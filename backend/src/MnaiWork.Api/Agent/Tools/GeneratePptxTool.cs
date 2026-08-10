@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MnaiWork.Api.Data;
 using MnaiWork.Api.Generation;
 using MnaiWork.Api.Infrastructure;
 using MnaiWork.Api.Models;
@@ -14,42 +15,73 @@ public sealed class GeneratePptxTool : IAgentTool
 
     private readonly PptxGenerator _generator;
     private readonly IFileStorage _storage;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<GeneratePptxTool> _logger;
 
-    public GeneratePptxTool(PptxGenerator generator, IFileStorage storage, ILogger<GeneratePptxTool> logger)
+    public GeneratePptxTool(PptxGenerator generator, IFileStorage storage, IServiceScopeFactory scopeFactory,
+        ILogger<GeneratePptxTool> logger)
     {
         _generator = generator;
         _storage = storage;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
     public string Name => "generate_pptx";
 
     public string Description =>
-        "Generate a polished PowerPoint presentation (.pptx) from a structured outline. " +
-        "Design one slide per key idea. Use layout 'title' for the opening slide, 'section' for chapter " +
-        "dividers, 'bullets' for content, 'two-column' to compare two things, 'quote' for a highlighted " +
-        "statement, and 'closing' for the final slide. Keep bullets short (max ~12 words).";
+        "Generate a polished PowerPoint presentation (.pptx) from a structured outline. Design one " +
+        "slide per key idea and VARY the layouts for visual interest — do not make every slide 'bullets'. " +
+        "Layouts: 'title' (opening), 'section' (chapter divider), 'bullets' (a few short points), " +
+        "'cards' (3-6 titled cards, each with a short description — ideal for summaries, agendas, " +
+        "features, pillars), 'stats' (2-4 headline metrics with big numbers), 'two-column' (compare two " +
+        "things), 'quote' (a highlighted statement), 'image' (place an uploaded image full-width, set " +
+        "'imageId' to an attachment id), and 'closing' (final slide). Keep text punchy: " +
+        "bullets and card descriptions under ~14 words, cover/section subtitles under ~12 words.";
 
     public string ParametersSchema => """
     {
       "type": "object",
       "properties": {
         "title": { "type": "string", "description": "Deck title." },
-        "subtitle": { "type": "string" },
+        "subtitle": { "type": "string", "description": "Short punchy tagline for the cover (< 12 words)." },
         "author": { "type": "string" },
         "theme": { "type": "string", "enum": ["midnight", "azure", "sunset", "forest", "mono"],
-          "description": "Visual theme. Default midnight." },
+          "description": "Visual theme chosen to fit the topic. Default midnight." },
         "slides": {
           "type": "array",
-          "description": "Ordered slides.",
+          "description": "Ordered slides. Aim for 6-12. Open with 'title', use 'section' dividers, mix 'cards'/'stats'/'timeline'/'comparison'/'chart'/'two-column'/'quote' with 'bullets', and end with 'closing'.",
           "items": {
             "type": "object",
             "properties": {
-              "layout": { "type": "string", "enum": ["title", "section", "bullets", "two-column", "quote", "closing"] },
+              "layout": { "type": "string", "enum": ["title", "section", "bullets", "cards", "stats", "two-column", "timeline", "comparison", "image-side", "chart", "quote", "image", "closing"] },
               "title": { "type": "string" },
               "subtitle": { "type": "string" },
-              "bullets": { "type": "array", "items": { "type": "string" } },
+              "imageId": { "type": "string", "description": "For 'image'/'image-side' slides: the id of an uploaded image attachment." },
+              "bullets": { "type": "array", "items": { "type": "string" },
+                "description": "For 'bullets': 3-5 short points (< 14 words each)." },
+              "cards": {
+                "type": "array",
+                "description": "For 'cards': 3-6 cards, each a short title plus an 8-16 word description.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": { "type": "string" },
+                    "description": { "type": "string" }
+                  }
+                }
+              },
+              "stats": {
+                "type": "array",
+                "description": "For 'stats': 2-4 metrics, each a big value (e.g. '24%', '$1.2M') and a short label.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "type": "string" },
+                    "label": { "type": "string" }
+                  }
+                }
+              },
               "columns": {
                 "type": "array",
                 "items": {
@@ -57,6 +89,49 @@ public sealed class GeneratePptxTool : IAgentTool
                   "properties": {
                     "heading": { "type": "string" },
                     "bullets": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              },
+              "timeline": {
+                "type": "array",
+                "description": "For 'timeline': 3-5 steps in order.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "marker": { "type": "string", "description": "Date/phase label, e.g. 'Q1', '2024', 'Step 1'." },
+                    "title": { "type": "string" },
+                    "description": { "type": "string" }
+                  }
+                }
+              },
+              "comparison": {
+                "type": "array",
+                "description": "For 'comparison': 2-3 option columns.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "heading": { "type": "string" },
+                    "subtitle": { "type": "string" },
+                    "points": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              },
+              "chart": {
+                "type": "object",
+                "description": "For 'chart': a native editable chart.",
+                "properties": {
+                  "type": { "type": "string", "enum": ["bar", "line", "pie"] },
+                  "categories": { "type": "array", "items": { "type": "string" }, "description": "X-axis / slice labels." },
+                  "series": {
+                    "type": "array",
+                    "description": "One or more data series (pie uses the first only).",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": { "type": "string" },
+                        "values": { "type": "array", "items": { "type": "number" } }
+                      }
+                    }
                   }
                 }
               },
@@ -90,7 +165,13 @@ public sealed class GeneratePptxTool : IAgentTool
 
         try
         {
-            var bytes = _generator.Generate(spec);
+            var images = await ResolveImagesAsync(spec, context, ct);
+          var imageError = ValidateImageReferences(spec, images);
+          if (imageError is not null)
+          {
+            return ToolResult.Fail(imageError);
+          }
+            var bytes = _generator.Generate(spec, images);
             var fileName = EnsureExtension(spec.Title, ".pptx");
             var owner = new ArtifactOwner(context.UserId, context.ThreadId);
             var artifact = await _storage.UploadAsync(owner, fileName, ArtifactKind.Pptx, bytes, PptxContentType, ct);
@@ -105,6 +186,43 @@ public sealed class GeneratePptxTool : IAgentTool
             _logger.LogError(ex, "PPTX generation failed for thread {ThreadId}", context.ThreadId);
             return ToolResult.Fail($"Failed to generate the presentation: {ex.Message}");
         }
+    }
+
+    private async Task<Dictionary<string, ImageAsset>> ResolveImagesAsync(
+        DeckSpec spec, ToolContext context, CancellationToken ct)
+    {
+        var ids = spec.Slides.Select(s => s.ImageId).Where(id => !string.IsNullOrWhiteSpace(id))!.Cast<string>();
+        using var scope = _scopeFactory.CreateScope();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        return await ThreadAttachments.ResolveImagesAsync(ids, messages, _storage, context.ThreadId, ct);
+    }
+
+    private static string? ValidateImageReferences(DeckSpec spec, IReadOnlyDictionary<string, ImageAsset> images)
+    {
+      for (int i = 0; i < spec.Slides.Count; i++)
+      {
+        var slide = spec.Slides[i];
+        var layout = (slide.Layout ?? string.Empty).Trim();
+        var usesImageLayout = string.Equals(layout, "image", StringComparison.OrdinalIgnoreCase)
+          || string.Equals(layout, "image-side", StringComparison.OrdinalIgnoreCase);
+
+        if (!usesImageLayout)
+        {
+          continue;
+        }
+
+        if (string.IsNullOrWhiteSpace(slide.ImageId))
+        {
+          return $"Slide {i + 1} uses layout '{layout}' but has no imageId. Only use 'image'/'image-side' when referencing an uploaded image attachment.";
+        }
+
+        if (!images.ContainsKey(slide.ImageId))
+        {
+          return $"Slide {i + 1} references imageId '{slide.ImageId}', but that uploaded image could not be resolved in this conversation.";
+        }
+      }
+
+      return null;
     }
 
     private static string EnsureExtension(string title, string ext)

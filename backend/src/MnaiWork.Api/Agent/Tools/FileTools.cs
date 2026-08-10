@@ -29,6 +29,56 @@ internal static class ThreadArtifacts
     }
 }
 
+/// <summary>Resolves user-uploaded attachments strictly within the caller's current thread.</summary>
+internal static class ThreadAttachments
+{
+    public static async Task<IReadOnlyList<Attachment>> ListAsync(
+        IMessageRepository messages, string threadId, CancellationToken ct)
+    {
+        var history = await messages.ListAsync(threadId, ct);
+        return history.SelectMany(m => m.Attachments).ToList();
+    }
+
+    public static async Task<Attachment?> FindAsync(
+        IMessageRepository messages, string threadId, string attachmentId, CancellationToken ct)
+    {
+        var all = await ListAsync(messages, threadId, ct);
+        return all.FirstOrDefault(a => string.Equals(a.Id, attachmentId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Resolves referenced image attachment ids into decoded <see cref="ImageAsset"/>s.</summary>
+    public static async Task<Dictionary<string, ImageAsset>> ResolveImagesAsync(
+        IEnumerable<string> imageIds, IMessageRepository messages, IFileStorage storage,
+        string threadId, CancellationToken ct)
+    {
+        var result = new Dictionary<string, ImageAsset>(StringComparer.OrdinalIgnoreCase);
+        var wanted = imageIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (wanted.Count == 0)
+        {
+            return result;
+        }
+
+        var all = await ListAsync(messages, threadId, ct);
+        foreach (var id in wanted)
+        {
+            var att = all.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)
+                && a.Kind == AttachmentKind.Image);
+            if (att is null)
+            {
+                continue;
+            }
+            var bytes = await storage.ReadBytesAsync(att.BlobPath, ct);
+            if (bytes is null || bytes.Length == 0)
+            {
+                continue;
+            }
+            var (w, h) = ImageDimensions.Read(bytes);
+            result[id] = new ImageAsset(bytes, att.ContentType, w, h);
+        }
+        return result;
+    }
+}
+
 /// <summary>Lists the documents/presentations already generated in the current conversation.</summary>
 public sealed class ListMyFilesTool : IAgentTool
 {
@@ -156,6 +206,98 @@ public sealed class ReadMyFileTool : IAgentTool
             _logger.LogError(ex, "read_my_file failed for artifact {ArtifactId} in thread {ThreadId}",
                 fileId, context.ThreadId);
             return ToolResult.Fail($"Failed to read the file: {ex.Message}");
+        }
+    }
+}
+
+/// <summary>Reads the text of a file the user uploaded to this conversation (pdf / docx / pptx).</summary>
+public sealed class ReadAttachmentTool : IAgentTool
+{
+    private const int MaxChars = 24000;
+
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IFileStorage _storage;
+    private readonly ILogger<ReadAttachmentTool> _logger;
+
+    public ReadAttachmentTool(IServiceScopeFactory scopeFactory, IFileStorage storage, ILogger<ReadAttachmentTool> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _storage = storage;
+        _logger = logger;
+    }
+
+    public string Name => "read_attachment";
+
+    public string Description =>
+        "Read the text content of a file the user UPLOADED to this conversation, by its attachment id. " +
+        "Works for pdf, docx and pptx. Use this to understand an uploaded document before generating a " +
+        "new one from it. (For images, do not read text — reference the image id in the generate tools " +
+        "to embed it.) Attachment ids and kinds are listed in the user's message.";
+
+    public string ParametersSchema => """
+    {
+      "type": "object",
+      "properties": {
+        "attachmentId": { "type": "string", "description": "The id of an uploaded attachment." }
+      },
+      "required": ["attachmentId"]
+    }
+    """;
+
+    public async Task<ToolResult> ExecuteAsync(JsonElement arguments, ToolContext context, CancellationToken ct)
+    {
+        if (!arguments.TryGetProperty("attachmentId", out var idProp) || idProp.GetString() is not { Length: > 0 } id)
+        {
+            return ToolResult.Fail("read_attachment requires an 'attachmentId'.");
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        var att = await ThreadAttachments.FindAsync(messages, context.ThreadId, id, ct);
+        if (att is null)
+        {
+            return ToolResult.Fail($"No uploaded attachment with id '{id}' exists in this conversation.");
+        }
+        if (att.Kind == AttachmentKind.Image)
+        {
+            return ToolResult.Fail(
+                $"'{att.FileName}' is an image and has no text. To use it, reference imageId \"{att.Id}\" " +
+                "in generate_docx (an 'image' block) or generate_pptx (an 'image' slide).");
+        }
+
+        try
+        {
+            var bytes = await _storage.ReadBytesAsync(att.BlobPath, ct);
+            if (bytes is null)
+            {
+                return ToolResult.Fail($"The file '{att.FileName}' could not be found in storage.");
+            }
+
+            var text = att.Kind switch
+            {
+                AttachmentKind.Pdf => DocumentTextExtractor.FromPdf(bytes),
+                AttachmentKind.Docx => DocumentTextExtractor.FromDocx(bytes),
+                AttachmentKind.Pptx => DocumentTextExtractor.FromPptx(bytes),
+                _ => string.Empty
+            };
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return ToolResult.Ok($"\"{att.FileName}\" contains no extractable text.");
+            }
+
+            var truncated = text.Length > MaxChars;
+            if (truncated)
+            {
+                text = text[..MaxChars];
+            }
+            return ToolResult.Ok($"Contents of uploaded \"{att.FileName}\"{(truncated ? " (truncated)" : "")}:\n\n{text}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "read_attachment failed for {AttachmentId} in thread {ThreadId}", id, context.ThreadId);
+            return ToolResult.Fail($"Failed to read the attachment: {ex.Message}");
         }
     }
 }
