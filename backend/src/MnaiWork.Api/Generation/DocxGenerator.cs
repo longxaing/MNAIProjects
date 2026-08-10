@@ -1,6 +1,9 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 
 namespace MnaiWork.Api.Generation;
 
@@ -9,9 +12,12 @@ public sealed class DocxGenerator
 {
     private const int BulletNumId = 1;
     private const int DecimalNumId = 2;
+    private const long EmuPerInch = 914400;
+    private const long MaxImageWidthEmu = (long)(6.0 * EmuPerInch); // fits within 1.25" margins
 
-    public byte[] Generate(DocSpec spec)
+    public byte[] Generate(DocSpec spec, IReadOnlyDictionary<string, ImageAsset>? images = null)
     {
+        images ??= new Dictionary<string, ImageAsset>();
         var theme = Themes.Get(spec.Theme);
         using var ms = new MemoryStream();
 
@@ -38,9 +44,17 @@ public sealed class DocxGenerator
             }
             body.AppendChild(DividerParagraph(theme.Accent));
 
+            uint imageId = 1;
             foreach (var block in spec.Blocks)
             {
-                RenderBlock(body, block, theme);
+                if (string.Equals(block.Type?.Trim(), "image", StringComparison.OrdinalIgnoreCase))
+                {
+                    RenderImage(mainPart, body, block, images, theme, ref imageId);
+                }
+                else
+                {
+                    RenderBlock(body, block, theme);
+                }
             }
 
             AddSectionProperties(body);
@@ -49,6 +63,93 @@ public sealed class DocxGenerator
 
         return ms.ToArray();
     }
+
+    private static void RenderImage(MainDocumentPart mainPart, Body body, DocBlock block,
+        IReadOnlyDictionary<string, ImageAsset> images, DeckTheme theme, ref uint imageId)
+    {
+        if (block.ImageId is null || !images.TryGetValue(block.ImageId, out var asset))
+        {
+            return;
+        }
+
+        var partType = ImagePartTypeFor(asset.ContentType);
+        var imagePart = mainPart.AddImagePart(partType);
+        using (var stream = new MemoryStream(asset.Bytes, writable: false))
+        {
+            imagePart.FeedData(stream);
+        }
+        var relId = mainPart.GetIdOfPart(imagePart);
+
+        // Scale to fit the content width while preserving aspect ratio.
+        long w = MaxImageWidthEmu;
+        long h = asset.PixelWidth > 0
+            ? (long)(MaxImageWidthEmu * (asset.PixelHeight / (double)asset.PixelWidth))
+            : MaxImageWidthEmu;
+        if (asset.PixelWidth > 0 && (long)(asset.PixelWidth / 96.0 * EmuPerInch) < MaxImageWidthEmu)
+        {
+            // Image is smaller than the content width — keep its natural size.
+            w = (long)(asset.PixelWidth / 96.0 * EmuPerInch);
+            h = (long)(asset.PixelHeight / 96.0 * EmuPerInch);
+        }
+
+        var drawing = new Drawing(
+            new DW.Inline(
+                new DW.Extent { Cx = w, Cy = h },
+                new DW.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DW.DocProperties { Id = imageId, Name = $"Image{imageId}" },
+                new DW.NonVisualGraphicFrameDrawingProperties(new A.GraphicFrameLocks { NoChangeAspect = true }),
+                new A.Graphic(new A.GraphicData(
+                    new PIC.Picture(
+                        new PIC.NonVisualPictureProperties(
+                            new PIC.NonVisualDrawingProperties { Id = 0U, Name = $"Image{imageId}" },
+                            new PIC.NonVisualPictureDrawingProperties()),
+                        new PIC.BlipFill(
+                            new A.Blip { Embed = relId },
+                            new A.Stretch(new A.FillRectangle())),
+                        new PIC.ShapeProperties(
+                            new A.Transform2D(
+                                new A.Offset { X = 0L, Y = 0L },
+                                new A.Extents { Cx = w, Cy = h }),
+                            new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }))
+                    )
+                { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U });
+
+        body.AppendChild(new Paragraph(
+            new ParagraphProperties(
+                new SpacingBetweenLines { Before = "120", After = block.Text is { Length: > 0 } ? "40" : "160" },
+                new Justification { Val = JustificationValues.Center }),
+            new Run(drawing)));
+
+        if (!string.IsNullOrWhiteSpace(block.Text))
+        {
+            var caption = new Paragraph(
+                new ParagraphProperties(
+                    new SpacingBetweenLines { After = "160" },
+                    new Justification { Val = JustificationValues.Center }),
+                new Run(new Text(block.Text!) { Space = SpaceProcessingModeValues.Preserve })
+                {
+                    RunProperties = new RunProperties(
+                        new RunFonts { Ascii = theme.BodyFont, HighAnsi = theme.BodyFont },
+                        new Italic(),
+                        new Color { Val = theme.Muted },
+                        new FontSize { Val = "18" })
+                });
+            body.AppendChild(caption);
+        }
+
+        imageId++;
+    }
+
+    private static PartTypeInfo ImagePartTypeFor(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/png" => ImagePartType.Png,
+        "image/gif" => ImagePartType.Gif,
+        "image/bmp" => ImagePartType.Bmp,
+        "image/tiff" => ImagePartType.Tiff,
+        _ => ImagePartType.Jpeg
+    };
+
 
     private void RenderBlock(Body body, DocBlock block, DeckTheme theme)
     {
@@ -62,6 +163,10 @@ public sealed class DocxGenerator
                 break;
             case "heading3":
                 body.AppendChild(StyledParagraph(block.Text ?? "", 13, theme.ContentInk, true, 200, 40, theme.HeadingFont));
+                break;
+            case "lead":
+                // A larger intro paragraph that opens a document or section.
+                body.AppendChild(StyledParagraph(block.Text ?? "", 13, theme.Muted, false, 60, 160, theme.BodyFont, justify: true));
                 break;
             case "bullets":
                 foreach (var item in block.Items)
@@ -77,6 +182,12 @@ public sealed class DocxGenerator
                 break;
             case "quote":
                 body.AppendChild(QuoteParagraph(block.Text ?? "", theme));
+                break;
+            case "callout":
+                foreach (var p in CalloutParagraphs(block.Title, block.Text ?? "", theme))
+                {
+                    body.AppendChild(p);
+                }
                 break;
             case "divider":
                 body.AppendChild(DividerParagraph(theme.Accent));
@@ -162,6 +273,52 @@ public sealed class DocxGenerator
             new ParagraphBorders(new BottomBorder { Val = BorderValues.Single, Color = colorHex, Size = 12U, Space = 1U }),
             new SpacingBetweenLines { Before = "60", After = "180" });
         return new Paragraph(props);
+    }
+
+    /// <summary>
+    /// A highlighted callout box: shaded background + accent left border, with an optional
+    /// bold label line. Great for key takeaways so they stand out from body prose.
+    /// </summary>
+    private static IEnumerable<Paragraph> CalloutParagraphs(string? title, string text, DeckTheme theme)
+    {
+        const string shade = "F2F5FB";
+        var result = new List<Paragraph>();
+        var hasTitle = !string.IsNullOrWhiteSpace(title);
+
+        if (hasTitle)
+        {
+            var titleProps = new ParagraphProperties
+            {
+                ParagraphBorders = new ParagraphBorders(
+                    new LeftBorder { Val = BorderValues.Single, Color = theme.Accent, Size = 24U, Space = 10U }),
+                Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = shade },
+                SpacingBetweenLines = new SpacingBetweenLines { Before = "160", After = "0", Line = "276", LineRule = LineSpacingRuleValues.Auto },
+                Indentation = new Indentation { Left = "220", Right = "220" }
+            };
+            var titleRun = new Run(new Text(title!) { Space = SpaceProcessingModeValues.Preserve })
+            {
+                RunProperties = RunProps(11, theme.Primary, true, theme.HeadingFont)
+            };
+            result.Add(new Paragraph(titleProps, titleRun));
+        }
+
+        var bodyProps = new ParagraphProperties
+        {
+            ParagraphBorders = new ParagraphBorders(
+                new LeftBorder { Val = BorderValues.Single, Color = theme.Accent, Size = 24U, Space = 10U }),
+            Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = shade },
+            SpacingBetweenLines = new SpacingBetweenLines
+            {
+                Before = hasTitle ? "20" : "160", After = "160", Line = "276", LineRule = LineSpacingRuleValues.Auto
+            },
+            Indentation = new Indentation { Left = "220", Right = "220" }
+        };
+        var bodyRun = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve })
+        {
+            RunProperties = RunProps(11, theme.ContentInk, false, theme.BodyFont)
+        };
+        result.Add(new Paragraph(bodyProps, bodyRun));
+        return result;
     }
 
     private static RunProperties RunProps(int sizePt, string colorHex, bool bold, string font)

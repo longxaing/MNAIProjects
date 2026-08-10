@@ -2,6 +2,21 @@ import type { Message } from "../api/types";
 import { useChat } from "../store/chat";
 import ArtifactCard from "./ArtifactCard";
 
+function attachmentIcon(kind: string): string {
+  switch (kind) {
+    case "image":
+      return "🖼️";
+    case "pdf":
+      return "📄";
+    case "docx":
+      return "📝";
+    case "pptx":
+      return "📊";
+    default:
+      return "📎";
+  }
+}
+
 export default function MessageItem({ message }: { message: Message }) {
   const threadId = useChat((s) => s.currentThreadId) ?? message.threadId;
 
@@ -52,6 +67,16 @@ export default function MessageItem({ message }: { message: Message }) {
             message.streaming && <span className="caret" />
           )}
         </div>
+        {message.attachments.length > 0 && (
+          <div className="msg-attachments">
+            {message.attachments.map((a) => (
+              <span key={a.id} className="msg-attachment" title={a.fileName}>
+                <span className="attach-ico">{attachmentIcon(a.kind)}</span>
+                <span className="attach-name">{a.fileName}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {message.artifacts.map((a) => (
           <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
         ))}

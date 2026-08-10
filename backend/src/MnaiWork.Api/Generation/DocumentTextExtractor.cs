@@ -1,5 +1,6 @@
 using System.Text;
 using DocumentFormat.OpenXml.Packaging;
+using UglyToad.PdfPig;
 using P = DocumentFormat.OpenXml.Presentation;
 using D = DocumentFormat.OpenXml.Drawing;
 
@@ -8,6 +9,22 @@ namespace MnaiWork.Api.Generation;
 /// <summary>Extracts plain text from generated .docx / .pptx bytes so the model can read them back.</summary>
 public static class DocumentTextExtractor
 {
+    public static string FromPdf(byte[] bytes)
+    {
+        using var doc = PdfDocument.Open(bytes);
+        var sb = new StringBuilder();
+        foreach (var page in doc.GetPages())
+        {
+            var text = page.Text;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                sb.AppendLine($"--- Page {page.Number} ---");
+                sb.AppendLine(text);
+            }
+        }
+        return sb.ToString();
+    }
+
     public static string FromDocx(byte[] bytes)
     {
         using var ms = new MemoryStream(bytes, writable: false);

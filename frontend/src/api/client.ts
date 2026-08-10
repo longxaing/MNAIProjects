@@ -1,6 +1,7 @@
 import { authEnabled, getToken } from "../auth/auth";
 import type {
   AgentEvent,
+  Attachment,
   ChatThread,
   Message,
   SendMessageResponse,
@@ -9,9 +10,9 @@ import type {
 
 const BASE = import.meta.env.VITE_API_BASE?.trim() || "";
 
-async function buildHeaders(hasBody: boolean): Promise<Record<string, string>> {
+async function buildHeaders(jsonBody: boolean): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
-  if (hasBody) headers["Content-Type"] = "application/json";
+  if (jsonBody) headers["Content-Type"] = "application/json";
 
   const token = await getToken();
   if (token) {
@@ -25,10 +26,12 @@ async function buildHeaders(hasBody: boolean): Promise<Record<string, string>> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const hasBody = init?.body != null;
+  // Only set a JSON content type for plain-body requests. FormData must keep its
+  // browser-generated multipart boundary, so we detect and skip it.
+  const jsonBody = init?.body != null && !(init.body instanceof FormData);
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { ...(await buildHeaders(hasBody)), ...(init?.headers ?? {}) }
+    headers: { ...(await buildHeaders(jsonBody)), ...(init?.headers ?? {}) }
   });
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`);
@@ -58,11 +61,21 @@ export const api = {
   getMessages: (threadId: string) =>
     request<Message[]>(`/api/threads/${threadId}/messages`),
 
-  sendMessage: (threadId: string, content: string) =>
+  sendMessage: (threadId: string, content: string, attachments?: Attachment[]) =>
     request<SendMessageResponse>(`/api/threads/${threadId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content })
-    })
+      body: JSON.stringify({ content, attachments: attachments ?? [] })
+    }),
+
+  uploadFile: async (threadId: string, file: File): Promise<Attachment> => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    // Note: do NOT set Content-Type; the browser sets the multipart boundary.
+    return request<Attachment>(`/api/threads/${threadId}/uploads`, {
+      method: "POST",
+      body: form
+    });
+  }
 };
 
 /**

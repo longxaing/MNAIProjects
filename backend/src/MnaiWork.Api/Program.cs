@@ -94,6 +94,7 @@ builder.Services.AddSingleton<IAgentTool, GeneratePptxTool>();
 builder.Services.AddSingleton<IAgentTool, GenerateDocxTool>();
 builder.Services.AddSingleton<IAgentTool, ListMyFilesTool>();
 builder.Services.AddSingleton<IAgentTool, ReadMyFileTool>();
+builder.Services.AddSingleton<IAgentTool, ReadAttachmentTool>();
 builder.Services.AddSingleton<ToolRegistry>();
 
 builder.Services.AddSingleton<IAgentEventBus, AgentEventBus>();

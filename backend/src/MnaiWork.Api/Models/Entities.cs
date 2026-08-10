@@ -25,6 +25,41 @@ public enum ArtifactKind
     Pptx
 }
 
+/// <summary>Kind of a user-uploaded file.</summary>
+public enum AttachmentKind
+{
+    Image,
+    Pdf,
+    Docx,
+    Pptx,
+    Other
+}
+
+/// <summary>A user-uploaded file stored in Blob Storage and referenced from a message.</summary>
+public sealed class Attachment
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    [JsonPropertyName("kind")]
+    public AttachmentKind Kind { get; set; }
+
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = string.Empty;
+
+    [JsonPropertyName("blobPath")]
+    public string BlobPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("contentType")]
+    public string ContentType { get; set; } = "application/octet-stream";
+
+    [JsonPropertyName("sizeBytes")]
+    public long SizeBytes { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>Per-user quota / throttling rules (inspired by Societas' throttle_rule).</summary>
 public sealed class UserQuota
 {
@@ -143,6 +178,10 @@ public sealed class ChatMessage
 
     [JsonPropertyName("artifacts")]
     public List<Artifact> Artifacts { get; set; } = new();
+
+    /// <summary>Files the user attached to this message (images / pdf / docx / pptx).</summary>
+    [JsonPropertyName("attachments")]
+    public List<Attachment> Attachments { get; set; } = new();
 
     /// <summary>True while the assistant message is still streaming.</summary>
     [JsonPropertyName("streaming")]

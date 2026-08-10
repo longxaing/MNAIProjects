@@ -9,6 +9,16 @@ export interface Artifact {
   createdAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  kind: "image" | "pdf" | "docx" | "pptx" | "other";
+  fileName: string;
+  blobPath: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface Message {
   id: string;
   threadId: string;
@@ -18,6 +28,7 @@ export interface Message {
   toolName?: string;
   sequence: number;
   artifacts: Artifact[];
+  attachments: Attachment[];
   streaming?: boolean;
   createdAt: string;
   updatedAt: string;
