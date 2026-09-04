@@ -27,4 +27,50 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\infra\generated-deployment\main.json"
+              Link="Deployment\Templates\generated-deployment.json" />
+    <EmbeddedResource Include="Agent\Skills\skill_packs\software-factory\SKILL.md">
+      <LogicalName>MnaiWork.Api.Agent.Skills.skill_packs.software_factory.SKILL.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\GeneratedApp.sln">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/GeneratedApp.sln</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\backend\**\*.cs;..\..\tests\BuildWorkerFixture\src\backend\**\*.csproj"
+              Exclude="..\..\tests\BuildWorkerFixture\src\backend\bin\**;..\..\tests\BuildWorkerFixture\src\backend\obj\**">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/backend/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\tests\backend.unit\**\*.cs;..\..\tests\BuildWorkerFixture\tests\backend.unit\**\*.csproj"
+              Exclude="..\..\tests\BuildWorkerFixture\tests\backend.unit\bin\**;..\..\tests\BuildWorkerFixture\tests\backend.unit\obj\**">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/tests/backend.unit/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\tests\backend.integration\**\*.cs;..\..\tests\BuildWorkerFixture\tests\backend.integration\**\*.csproj"
+              Exclude="..\..\tests\BuildWorkerFixture\tests\backend.integration\bin\**;..\..\tests\BuildWorkerFixture\tests\backend.integration\obj\**">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/tests/backend.integration/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\package.json;..\..\tests\BuildWorkerFixture\src\frontend\package-lock.json;..\..\tests\BuildWorkerFixture\src\frontend\index.html;..\..\tests\BuildWorkerFixture\src\frontend\tsconfig.json;..\..\tests\BuildWorkerFixture\src\frontend\vite.config.ts;..\..\tests\BuildWorkerFixture\src\frontend\vitest.config.ts;..\..\tests\BuildWorkerFixture\src\frontend\playwright.config.ts">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\src\**\*.ts;..\..\tests\BuildWorkerFixture\src\frontend\src\**\*.tsx">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/src/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\public\**\*">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/public/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\tests\**\*.ts">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/tests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MnaiWork.BuildWorker\MnaiWork.BuildWorker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MnaiWork.Api.Tests" />
+  </ItemGroup>
+
 </Project>

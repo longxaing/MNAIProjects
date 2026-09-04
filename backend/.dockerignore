@@ -1,0 +1,8 @@
+**/bin/**
+**/obj/**
+**/node_modules/**
+**/TestResults/**
+publish/**
+tests/**
+sandbox/e2bdocker/workspace/**
+sandbox/e2bdocker/*.log

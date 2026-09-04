@@ -45,6 +45,13 @@ public interface IUserRepository
         bool personalAccount, CancellationToken ct = default);
 }
 
+    public interface IDeploymentProfileRepository
+    {
+        Task<DeploymentProfile?> GetAsync(CancellationToken ct = default);
+        Task<DeploymentProfile> ReplaceAsync(
+        DeploymentProfile profile, string etag, CancellationToken ct = default);
+    }
+
 public sealed class ThreadRepository : IThreadRepository
 {
     private readonly Container _container;
@@ -306,5 +313,46 @@ public sealed class UserRepository : IUserRepository
         }
 
         return await UpsertAsync(user, ct);
+    }
+}
+
+public sealed class DeploymentProfileRepository : IDeploymentProfileRepository
+{
+    private readonly Container _container;
+
+    public DeploymentProfileRepository(CosmosContext context)
+        => _container = context.DeploymentProfiles;
+
+    public async Task<DeploymentProfile?> GetAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _container.ReadItemAsync<DeploymentProfile>(
+                DeploymentProfile.DefaultId,
+                new PartitionKey(DeploymentProfile.DefaultId),
+                cancellationToken: ct);
+            response.Resource.ETag = response.ETag;
+            return response.Resource;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<DeploymentProfile> ReplaceAsync(
+        DeploymentProfile profile,
+        string etag,
+        CancellationToken ct = default)
+    {
+        profile.Id = DeploymentProfile.DefaultId;
+        var response = await _container.ReplaceItemAsync(
+            profile,
+            profile.Id,
+            new PartitionKey(profile.Id),
+            new ItemRequestOptions { IfMatchEtag = etag },
+            ct);
+        response.Resource.ETag = response.ETag;
+        return response.Resource;
     }
 }

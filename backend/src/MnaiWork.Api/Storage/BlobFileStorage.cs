@@ -194,7 +194,10 @@ public sealed class BlobFileStorage : IFileStorage
         {
             // Fall back to a backend-proxied download route if SAS cannot be generated.
             _logger.LogWarning(ex, "Unable to generate SAS URL for {Blob}; falling back to proxy route.", blob.Name);
-            return $"/api/files/{Uri.EscapeDataString(blob.Name)}";
+            var encodedPath = string.Join(
+                "/",
+                blob.Name.Split('/').Select(Uri.EscapeDataString));
+            return $"/api/files/{encodedPath}";
         }
     }
 

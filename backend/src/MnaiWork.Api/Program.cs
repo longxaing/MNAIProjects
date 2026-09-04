@@ -1,12 +1,16 @@
 using System.ClientModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Core;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using MnaiWork.Api.Agent;
+using MnaiWork.Api.Agent.Skills;
 using MnaiWork.Api.Agent.Tools;
+using MnaiWork.BuildExecution;
 using MnaiWork.Api.Configuration;
 using MnaiWork.Api.Data;
+using MnaiWork.Api.Deployment;
 using MnaiWork.Api.Generation;
 using MnaiWork.Api.Infrastructure;
 using MnaiWork.Api.Storage;
@@ -34,29 +38,58 @@ if (!string.IsNullOrWhiteSpace(keyVaultUri))
     builder.Configuration.AddAzureKeyVault(new Uri(keyVaultUri), new DefaultAzureCredential());
 }
 
+// The software-factory profile must already exist in Cosmos. We intentionally do not fall back to
+// Key Vault or App Configuration for these editable settings.
+var cosmosSettings = builder.Configuration.GetSection(CosmosOptions.SectionName).Get<CosmosOptions>()
+    ?? new CosmosOptions();
+if (string.IsNullOrWhiteSpace(cosmosSettings.Endpoint))
+{
+    throw new InvalidOperationException(
+        "Cosmos:Endpoint must be configured before the Cosmos deployment profile can be loaded.");
+}
+var bootstrapClientOptions = new CosmosClientOptions
+{
+    Serializer = new SystemTextJsonCosmosSerializer(JsonDefaults.Options),
+    ConnectionMode = ConnectionMode.Direct
+};
+var bootstrapCosmosClient = string.IsNullOrWhiteSpace(cosmosSettings.Key)
+    ? new CosmosClient(cosmosSettings.Endpoint, new DefaultAzureCredential(), bootstrapClientOptions)
+    : new CosmosClient(cosmosSettings.Endpoint, cosmosSettings.Key, bootstrapClientOptions);
+var bootstrapCosmosContext = new CosmosContext(
+    bootstrapCosmosClient, Options.Create(cosmosSettings));
+await bootstrapCosmosContext.InitializeAsync();
+IDeploymentProfileRepository bootstrapProfileRepository =
+    new DeploymentProfileRepository(bootstrapCosmosContext);
+var deploymentProfile = DeploymentProfileService.RequireExisting(
+    await bootstrapProfileRepository.GetAsync());
+
+var profileConfigurationSource = new DeploymentProfileConfigurationSource(
+    deploymentProfile.ToConfiguration());
+((IConfigurationBuilder)builder.Configuration).Add(profileConfigurationSource);
+var profileConfigurationProvider = profileConfigurationSource.Provider
+    ?? throw new InvalidOperationException("Deployment profile configuration provider was not created.");
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 builder.Services.Configure<AzureOpenAiOptions>(builder.Configuration.GetSection(AzureOpenAiOptions.SectionName));
 builder.Services.Configure<CosmosOptions>(builder.Configuration.GetSection(CosmosOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.Configure<AzureProvisioningOptions>(
+    builder.Configuration.GetSection(AzureProvisioningOptions.SectionName));
+builder.Services.Configure<BuildExecutionOptions>(
+    builder.Configuration.GetSection(BuildExecutionOptions.SectionName));
+builder.Services.AddSingleton(profileConfigurationProvider);
+builder.Services.AddSingleton(deploymentProfile);
 
 // ---------------------------------------------------------------------------
 // Azure clients
 // ---------------------------------------------------------------------------
-builder.Services.AddSingleton(sp =>
-{
-    var options = sp.GetRequiredService<IOptions<CosmosOptions>>().Value;
-    var clientOptions = new CosmosClientOptions
-    {
-        Serializer = new SystemTextJsonCosmosSerializer(JsonDefaults.Options),
-        ConnectionMode = ConnectionMode.Direct
-    };
-    return string.IsNullOrWhiteSpace(options.Key)
-        ? new CosmosClient(options.Endpoint, new DefaultAzureCredential(), clientOptions)
-        : new CosmosClient(options.Endpoint, options.Key, clientOptions);
-});
-builder.Services.AddSingleton<CosmosContext>();
+builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+
+builder.Services.AddSingleton(bootstrapCosmosClient);
+builder.Services.AddSingleton(bootstrapCosmosContext);
+builder.Services.AddSingleton(bootstrapProfileRepository);
 
 builder.Services.AddSingleton(sp =>
 {
@@ -65,6 +98,15 @@ builder.Services.AddSingleton(sp =>
         ? new BlobServiceClient(new Uri(options.ServiceUri), new DefaultAzureCredential())
         : new BlobServiceClient(options.ConnectionString);
 });
+
+builder.Services.AddHttpClient<ArmProjectDeploymentClient>();
+builder.Services.AddHttpClient<IE2BSandboxClient, E2BSandboxClient>(client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
+builder.Services.AddSingleton<RuntimeAzureProvisioningOptions>();
+builder.Services.AddSingleton<AzureProvisioningOperationGate>();
+builder.Services.AddSingleton<BuildExecutor>();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -85,6 +127,7 @@ builder.Services.AddScoped<IThreadRepository, ThreadRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IRunRepository, RunRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddSingleton<DeploymentProfileService>();
 
 builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
 builder.Services.AddSingleton<PptxGenerator>();
@@ -95,7 +138,19 @@ builder.Services.AddSingleton<IAgentTool, GenerateDocxTool>();
 builder.Services.AddSingleton<IAgentTool, ListMyFilesTool>();
 builder.Services.AddSingleton<IAgentTool, ReadMyFileTool>();
 builder.Services.AddSingleton<IAgentTool, ReadAttachmentTool>();
+builder.Services.AddSingleton<IAgentTool, LoadSkillTool>();
+builder.Services.AddSingleton<IAgentTool, CreateProjectWorkspaceTool>();
+builder.Services.AddSingleton<IAgentTool, UpdateProjectWorkspaceTool>();
+builder.Services.AddSingleton<IAgentTool, ReadProjectWorkspaceTool>();
+builder.Services.AddSingleton<IAgentTool, BuildTestProjectTool>();
+builder.Services.AddSingleton<IAgentTool, PreviewAzureProjectTool>();
+builder.Services.AddSingleton<IAgentTool, DeployAzureProjectTool>();
+builder.Services.AddSingleton<IAgentTool, ListAzureProjectResourcesTool>();
+builder.Services.AddSingleton<IAgentTool, GetAzureProjectResourceTool>();
+builder.Services.AddSingleton<IAgentTool, GetDeploymentProfileTool>();
 builder.Services.AddSingleton<ToolRegistry>();
+builder.Services.AddSingleton<IAgentSkill, SoftwareFactorySkill>();
+builder.Services.AddSingleton<AgentSkillRegistry>();
 
 builder.Services.AddSingleton<IAgentEventBus, AgentEventBus>();
 builder.Services.AddSingleton<IAgentRunQueue, AgentRunQueue>();
@@ -110,22 +165,39 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 // Auth: Azure AD when configured, otherwise a local dev handler.
 // ---------------------------------------------------------------------------
 var azureAd = builder.Configuration.GetSection("AzureAd");
-var useAzureAd = !string.IsNullOrWhiteSpace(azureAd["ClientId"]);
+var azureAdClientId = azureAd["ClientId"];
+var azureAdTenantId = azureAd["TenantId"];
+var sharedAuthority = azureAdTenantId is "common" or "organizations" or "consumers";
+if (!string.IsNullOrWhiteSpace(azureAdClientId)
+    && (string.IsNullOrWhiteSpace(azureAdTenantId) || sharedAuthority)
+    && !builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException(
+        "AzureAd:TenantId must be a concrete tenant id in non-development environments.");
+}
+
+var provisioningEnabled = builder.Configuration.GetValue<bool>("AzureProvisioning:Enabled");
+var provisioningTenantId = builder.Configuration["AzureProvisioning:TenantId"];
+if (provisioningEnabled
+    && !string.Equals(azureAdTenantId, provisioningTenantId, StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        "AzureAd:TenantId must match AzureProvisioning:TenantId when provisioning is enabled.");
+}
+
+var useAzureAd = !string.IsNullOrWhiteSpace(azureAdClientId)
+    && !string.IsNullOrWhiteSpace(azureAdTenantId)
+    && !sharedAuthority;
 if (useAzureAd)
 {
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddMicrosoftIdentityWebApi(azureAd);
 
-    // Multi-tenant + personal accounts (authority "common"): tokens come from many issuers
-    // (each tenant + the MSA tenant), so accept any Microsoft issuer instead of a single one.
-    // Security still holds via signature + audience (aud must match this API).
     builder.Services.Configure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
     {
-        options.TokenValidationParameters.ValidateIssuer = false;
-
         // v2.0 access tokens carry the bare client id as `aud`, while v1.0 carry "api://<id>".
         // Accept both so either token version validates.
-        var clientId = azureAd["ClientId"];
+        var clientId = azureAdClientId;
         var appIdUri = azureAd["Audience"];
         var audiences = new[] { clientId, appIdUri, $"api://{clientId}" }
             .Where(a => !string.IsNullOrWhiteSpace(a))
@@ -139,7 +211,12 @@ else
     builder.Services.AddAuthentication(DevAuthHandler.SchemeName)
         .AddScheme<AuthenticationSchemeOptions, DevAuthHandler>(DevAuthHandler.SchemeName, _ => { });
 }
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DeploymentProfileAdmin",
+        policy => policy.RequireRole("MnaiWork.DeploymentAdmin"));
+});
 
 // ---------------------------------------------------------------------------
 // MVC / CORS / Swagger
@@ -159,25 +236,6 @@ builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p =>
     p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
-
-// Ensure Cosmos database/containers exist (best-effort at startup).
-var cosmosConfigured = !string.IsNullOrWhiteSpace(
-    builder.Configuration.GetSection(CosmosOptions.SectionName)["Endpoint"]);
-if (cosmosConfigured)
-{
-    try
-    {
-        await app.Services.GetRequiredService<CosmosContext>().InitializeAsync();
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Cosmos initialization failed. Check the Cosmos configuration.");
-    }
-}
-else
-{
-    app.Logger.LogWarning("Cosmos is not configured (Cosmos:Endpoint empty). API calls will fail until configured.");
-}
 
 if (app.Environment.IsDevelopment())
 {

@@ -413,10 +413,47 @@ button {
 }
 
 .content {
-  white-space: pre-wrap;
   word-wrap: break-word;
   line-height: 1.55;
   font-size: 15px;
+}
+
+.content > :first-child {
+  margin-top: 0;
+}
+
+.content > :last-child {
+  margin-bottom: 0;
+}
+
+.content pre {
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-hi);
+  white-space: pre;
+}
+
+.mermaid-diagram {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-error {
+  color: #fca5a5;
 }
 
 .tool-bubble {
@@ -534,6 +571,53 @@ button {
 .artifact-dl:hover {
   border-color: var(--brand);
   background: rgba(99, 102, 241, 0.12);
+}
+
+.ui-screenshot {
+  width: min(760px, 100%);
+  margin: 12px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-hi);
+}
+
+.ui-screenshot img {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.ui-screenshot-loading {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--muted);
+}
+
+.ui-screenshot figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.ui-screenshot figcaption span {
+  display: grid;
+  min-width: 0;
+}
+
+.ui-screenshot figcaption strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-screenshot figcaption small {
+  color: var(--muted);
 }
 
 /* ---------- Empty state ---------- */

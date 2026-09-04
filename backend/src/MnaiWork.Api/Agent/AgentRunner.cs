@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using MnaiWork.Api.Agent.Skills;
 using MnaiWork.Api.Agent.Tools;
 using MnaiWork.Api.Configuration;
 using MnaiWork.Api.Data;
@@ -23,6 +24,7 @@ public sealed class AgentRunner
     private readonly IRunRepository _runs;
     private readonly IAgentEventBus _bus;
     private readonly ToolRegistry _tools;
+    private readonly AgentSkillRegistry _skills;
     private readonly AzureOpenAiOptions _options;
     private readonly ILogger<AgentRunner> _logger;
 
@@ -33,6 +35,7 @@ public sealed class AgentRunner
         IRunRepository runs,
         IAgentEventBus bus,
         ToolRegistry tools,
+        AgentSkillRegistry skills,
         IOptions<AzureOpenAiOptions> options,
         ILogger<AgentRunner> logger)
     {
@@ -42,6 +45,7 @@ public sealed class AgentRunner
         _runs = runs;
         _bus = bus;
         _tools = tools;
+        _skills = skills;
         _options = options.Value;
         _logger = logger;
     }
@@ -75,13 +79,7 @@ public sealed class AgentRunner
             var instructions = prepared.Summary is null
                 ? SystemPrompts.Agent
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
-            var toolDefs = _tools.All
-                .Select(t => ResponseTool.CreateFunctionTool(
-                    functionName: t.Name,
-                    functionParameters: BinaryData.FromString(t.ParametersSchema),
-                    strictModeEnabled: false,
-                    functionDescription: t.Description))
-                .ToList();
+            instructions = $"{instructions}\n\n{_skills.BuildCatalogPrompt()}";
 
             for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
             {
@@ -97,9 +95,13 @@ public sealed class AgentRunner
                 {
                     options.InputItems.Add(item);
                 }
-                foreach (var tool in toolDefs)
+                foreach (var tool in _tools.All.Where(tool => _skills.IsToolAvailable(runId, tool.Name)))
                 {
-                    options.Tools.Add(tool);
+                    options.Tools.Add(ResponseTool.CreateFunctionTool(
+                        functionName: tool.Name,
+                        functionParameters: BinaryData.FromString(tool.ParametersSchema),
+                        strictModeEnabled: false,
+                        functionDescription: tool.Description));
                 }
 
                 var assistant = new ChatMessage
@@ -193,6 +195,7 @@ public sealed class AgentRunner
         }
         finally
         {
+            _skills.ClearRun(runId);
             Emit(new AgentEvent { Type = "done" });
             _bus.Complete(runId);
         }
@@ -209,6 +212,11 @@ public sealed class AgentRunner
         if (args is null)
         {
             result = ToolResult.Fail($"Could not parse arguments for tool '{call.FunctionName}'.");
+        }
+        else if (!_skills.IsToolAvailable(runId, call.FunctionName))
+        {
+            result = ToolResult.Fail(
+                $"Tool '{call.FunctionName}' is unavailable until its server-side skill is loaded.");
         }
         else if (_tools.TryGet(call.FunctionName, out var tool))
         {
@@ -228,9 +236,9 @@ public sealed class AgentRunner
             Content = result.Output,
             Sequence = sequence
         };
-        if (result.Artifact is not null)
+        if (result.Artifacts.Count > 0)
         {
-            toolMessage.Artifacts.Add(result.Artifact);
+            toolMessage.Artifacts.AddRange(result.Artifacts);
         }
         await _messages.AddAsync(toolMessage, ct);
 
@@ -242,9 +250,9 @@ public sealed class AgentRunner
             ToolStatus = result.Success ? "completed" : "failed",
             Summary = result.Output
         });
-        if (result.Artifact is not null)
+        foreach (var artifact in result.Artifacts)
         {
-            emit(new AgentEvent { Type = "artifact", MessageId = toolMessage.Id, Artifact = result.Artifact });
+            emit(new AgentEvent { Type = "artifact", MessageId = toolMessage.Id, Artifact = artifact });
         }
 
         input.Add(ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.Output));

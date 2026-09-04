@@ -3,6 +3,8 @@ import type {
   AgentEvent,
   Attachment,
   ChatThread,
+  DeploymentProfile,
+  DeploymentProfileUpdateResponse,
   Message,
   SendMessageResponse,
   ThreadListItem
@@ -46,6 +48,27 @@ export const api = {
    * records the user (first login) and refreshes last-seen on return visits.
    */
   getMe: () => request<unknown>("/api/users/me"),
+
+  getDeploymentProfile: async () => {
+    const res = await fetch(`${BASE}/api/deployment-profile`, {
+      headers: await buildHeaders(false)
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`);
+    return {
+      profile: (await res.json()) as DeploymentProfile,
+      etag: res.headers.get("ETag") ?? ""
+    };
+  },
+
+  updateDeploymentProfile: (
+    profile: DeploymentProfile,
+    etag: string
+  ) =>
+    request<DeploymentProfileUpdateResponse>("/api/deployment-profile", {
+      method: "PUT",
+      headers: { "If-Match": etag },
+      body: JSON.stringify(profile)
+    }),
 
   listThreads: () => request<ThreadListItem[]>("/api/threads"),
 
@@ -147,4 +170,20 @@ export async function downloadArtifact(
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+export async function getArtifactViewUrl(
+  threadId: string,
+  artifactId: string
+): Promise<{ url: string; revoke: boolean }> {
+  const { url } = await request<{ url: string }>(
+    `/api/threads/${threadId}/artifacts/${artifactId}/download`
+  );
+  if (/^https?:\/\//i.test(url)) {
+    return { url, revoke: false };
+  }
+
+  const response = await fetch(`${BASE}${url}`, { headers: await buildHeaders(false) });
+  if (!response.ok) throw new Error(`Screenshot load failed: ${response.status}`);
+  return { url: URL.createObjectURL(await response.blob()), revoke: true };
 }

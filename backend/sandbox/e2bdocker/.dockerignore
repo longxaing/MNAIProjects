@@ -1,0 +1,5 @@
+node_modules/**
+workspace/**
+.git/**
+*.log
+e2b.toml

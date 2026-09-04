@@ -13,6 +13,8 @@ namespace MnaiWork.Api.Controllers;
 [Route("api/threads")]
 public sealed class ThreadsController : ControllerBase
 {
+    private const int MaxMessageChars = 32_000;
+    private const int MaxMessageAttachments = 10;
     private readonly IThreadRepository _threads;
     private readonly IMessageRepository _messages;
     private readonly IRunRepository _runs;
@@ -121,6 +123,14 @@ public sealed class ThreadsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Content) && !hasAttachments)
         {
             return BadRequest("Message content or an attachment is required.");
+        }
+        if (request.Content.Length > MaxMessageChars)
+        {
+            return BadRequest($"Message content exceeds {MaxMessageChars} characters.");
+        }
+        if (request.Attachments is { Count: > MaxMessageAttachments })
+        {
+            return BadRequest($"A message can reference at most {MaxMessageAttachments} attachments.");
         }
 
         var thread = await _threads.GetAsync(_me.Id, threadId, ct);

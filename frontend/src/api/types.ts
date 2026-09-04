@@ -2,7 +2,15 @@ export type Role = "user" | "assistant" | "tool" | "system";
 
 export interface Artifact {
   id: string;
-  kind: "docx" | "pptx";
+  kind:
+    | "docx"
+    | "pptx"
+    | "sourceZip"
+    | "backendPackage"
+    | "frontendPackage"
+    | "buildReport"
+    | "uiScreenshot"
+    | "deploymentRecord";
   fileName: string;
   blobPath: string;
   sizeBytes: number;
@@ -52,6 +60,33 @@ export interface SendMessageResponse {
   runId: string;
   threadId: string;
   userMessageId: string;
+}
+
+export interface DeploymentProfile {
+  id: string;
+  azureProvisioningEnabled: boolean;
+  tenantId: string;
+  subscriptionId: string;
+  generatedResourceGroup: string;
+  location: string;
+  appServicePlanName: string;
+  deploymentPrincipalId: string;
+  azureTimeoutMinutes: number;
+  buildExecutionEnabled: boolean;
+  maxConcurrentBuilds: number;
+  commandTimeoutMinutes: number;
+  totalTimeoutMinutes: number;
+  playwrightVersion: string;
+  azureAdTenantId: string;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
+  _etag?: string;
+}
+
+export interface DeploymentProfileUpdateResponse {
+  profile: DeploymentProfile;
+  restartRequired: boolean;
 }
 
 /** Server-sent event payload emitted by the backend during a run. */

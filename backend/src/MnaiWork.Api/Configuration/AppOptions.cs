@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace MnaiWork.Api.Configuration;
 
 /// <summary>Azure Key Vault settings. When <see cref="Uri"/> is set, secrets are merged into config.</summary>
@@ -52,6 +54,7 @@ public sealed class CosmosOptions
     public string MessagesContainer { get; set; } = "messages";
     public string RunsContainer { get; set; } = "runs";
     public string UsersContainer { get; set; } = "users";
+    public string DeploymentProfilesContainer { get; set; } = "deploymentProfiles";
 }
 
 /// <summary>Azure Blob Storage settings for generated artifacts.</summary>
@@ -70,3 +73,79 @@ public sealed class StorageOptions
     /// <summary>Minutes a generated-file SAS/download link stays valid.</summary>
     public int DownloadLinkTtlMinutes { get; set; } = 120;
 }
+
+/// <summary>Fixed single-subscription target for generated demo projects.</summary>
+public sealed class AzureProvisioningOptions
+{
+    public const string SectionName = "AzureProvisioning";
+
+    public bool Enabled { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string SubscriptionId { get; set; } = string.Empty;
+    public string GeneratedResourceGroup { get; set; } = "rg-mnaiwork-generated-demo";
+    public string Location { get; set; } = "eastus2";
+    public string AppServicePlanName { get; set; } = "asp-mnaiwork-generated-demo";
+    public string DeploymentPrincipalId { get; set; } = string.Empty;
+    public int TimeoutMinutes { get; set; } = 30;
+}
+
+/// <summary>Reads the latest Azure provisioning options after DeploymentProfile reloads.</summary>
+public sealed class RuntimeAzureProvisioningOptions
+{
+    private readonly Func<AzureProvisioningOptions> _current;
+
+    public RuntimeAzureProvisioningOptions(IOptionsMonitor<AzureProvisioningOptions> monitor)
+        : this(() => monitor.CurrentValue)
+    {
+    }
+
+    private RuntimeAzureProvisioningOptions(Func<AzureProvisioningOptions> current)
+        => _current = current;
+
+    public static RuntimeAzureProvisioningOptions Fixed(AzureProvisioningOptions options)
+        => new(() => options);
+
+    private AzureProvisioningOptions Current => _current();
+
+    public bool Enabled => Current.Enabled;
+    public string TenantId => Current.TenantId;
+    public string SubscriptionId => Current.SubscriptionId;
+    public string GeneratedResourceGroup => Current.GeneratedResourceGroup;
+    public string Location => Current.Location;
+    public string AppServicePlanName => Current.AppServicePlanName;
+    public string DeploymentPrincipalId => Current.DeploymentPrincipalId;
+    public int TimeoutMinutes => Current.TimeoutMinutes;
+}
+
+public sealed class AzureProvisioningOperationGate
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    public async Task<IDisposable> EnterAsync(CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        return new Releaser(_gate);
+    }
+
+    private sealed class Releaser : IDisposable
+    {
+        private SemaphoreSlim? _gate;
+
+        public Releaser(SemaphoreSlim gate) => _gate = gate;
+
+        public void Dispose() => Interlocked.Exchange(ref _gate, null)?.Release();
+    }
+}
+
+/// <summary>Controls generated project builds executed in E2B sandboxes.</summary>
+public sealed class BuildExecutionOptions
+{
+    public const string SectionName = "BuildExecution";
+
+    public bool Enabled { get; set; }
+    public int MaxConcurrentBuilds { get; set; } = 1;
+    public int CommandTimeoutMinutes { get; set; } = 10;
+    public int TotalTimeoutMinutes { get; set; } = 30;
+    public string PlaywrightVersion { get; set; } = "1.62.1";
+}
+

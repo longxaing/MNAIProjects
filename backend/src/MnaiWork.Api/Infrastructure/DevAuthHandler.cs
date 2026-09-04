@@ -34,7 +34,8 @@ public sealed class DevAuthHandler : AuthenticationHandler<AuthenticationSchemeO
         {
             new Claim("oid", userId),
             new Claim(ClaimTypes.NameIdentifier, userId),
-            new Claim("preferred_username", $"{userId}@localhost")
+            new Claim("preferred_username", $"{userId}@localhost"),
+            new Claim(ClaimTypes.Role, "MnaiWork.DeploymentAdmin")
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

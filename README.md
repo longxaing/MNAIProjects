@@ -1,17 +1,21 @@
 # MnaiWork
 
-A chat-based agent that turns a request into a polished **Word document (.docx)** or
-**PowerPoint deck (.pptx)** — no sandbox, no headless browser. The model plans the content and
-the C# backend renders it directly with the Open XML SDK.
+A chat-based agent with two controlled production paths:
+
+- Create polished **Word documents (.docx)** and **PowerPoint decks (.pptx)** with Open XML.
+- Design, implement, test, review, and deploy **React + ASP.NET Core** applications through a
+  server-side software-factory Skill, disposable E2B sandboxes, and reviewed Azure ARM templates.
 
 - **Backend:** ASP.NET Core (.NET 8), Azure OpenAI **Responses API** (streaming), Azure **Cosmos DB**,
   Azure **Blob Storage**, Entra ID (AAD) auth.
 - **Frontend:** React + Vite + TypeScript, MSAL, streaming chat over SSE.
 - **Document generation:** pure C# via `DocumentFormat.OpenXml` with a set of curated themes and slide
-  layouts — a much simpler path than rendering HTML in a sandbox.
+  layouts.
+- **Software factory:** immutable source revisions, xUnit/Vitest/Playwright, E2B desktop/mobile UI
+  screenshots, managed identity, ARM what-if, explicit approvals, and idempotent Azure publication.
 
-> Inspired by the Societas architecture (start/consume decoupling, tool-calling agent, artifact
-> preview) but re-implemented from scratch in C#/React with a sandbox-free generation pipeline.
+> Inspired by the Societas start/consume separation, server-side Skills, and sandbox artifact flow,
+> but implemented for this repository's fixed C#/React and Azure security boundaries.
 
 ---
 
@@ -24,18 +28,24 @@ flowchart LR
     Q --> BG[AgentRunnerHostedService<br/>background worker]
     BG --> RUN[AgentRunner<br/>streaming ReAct loop]
     RUN <-->|stream + tools| AOAI[(Azure OpenAI<br/>Responses API)]
-    RUN --> TOOLS[generate_docx / generate_pptx]
-    TOOLS --> GEN[OpenXML generators]
-    GEN --> BLOB[(Blob Storage)]
+    RUN --> DOC[Document tools]
+    DOC --> GEN[OpenXML generators]
+    GEN --> BLOB[(Artifact Blob Storage)]
+    RUN --> SF[Software Factory Skill]
+    SF --> ARCH[Mermaid architecture<br/>user approval]
+    ARCH --> SRC[Immutable SourceZip revisions]
+    SRC --> E2B[E2B sandbox<br/>build + tests + UI screenshots]
+    E2B --> UI[Desktop/mobile review<br/>user approval]
+    UI --> ARM[ARM what-if<br/>deployment approval]
+    ARM --> AZ[App Service + Storage<br/>Cosmos + Key Vault]
     RUN -->|persist messages| COSMOS[(Cosmos DB)]
     RUN -->|live events| BUS[AgentEventBus]
     U -->|GET run stream SSE| BUS
 ```
 
-**Flow:** the client posts a message → the API stores it in Cosmos, creates a run, and returns a
-`runId` immediately. A background service picks up the run, streams the model response, invokes tools,
-persists every message, and publishes live events. The client consumes those events over an SSE long
-connection and reconciles with the persisted messages when the run completes.
+The client posts a message, the API stores it in Cosmos and queues a run, and the background agent
+streams text/tools over SSE. For software projects, the exact approved Mermaid architecture is kept
+in later LLM context and acts as the implementation contract.
 
 ---
 
@@ -43,10 +53,12 @@ connection and reconciles with the persisted messages when the run completes.
 
 - **.NET SDK 8** (`backend/global.json` pins `8.0.x`).
 - **Node.js 18+** and npm (for the frontend).
+- **Docker Desktop** and an **E2B** account for the custom sandbox template.
 - Azure resources:
   - **Azure OpenAI / AI Foundry** deployment that supports the Responses API (e.g. `gpt-5.1`).
   - **Azure Cosmos DB** (NoSQL) account (or the local Cosmos emulator).
   - **Azure Storage** account (Blob).
+  - **Azure Key Vault** for Agent secrets, including `E2B--ApiKey` and `E2B--TemplateId`.
   - *(Optional)* **Entra ID** app registrations for the SPA and API.
 
 ---
@@ -108,7 +120,37 @@ MSAL sign-in.
 
 ---
 
-## How generation works (the "simpler beautiful PPT" approach)
+## Software factory workflow
+
+1. The Agent turns the idea into acceptance criteria and a rendered Mermaid architecture diagram.
+2. The user reviews it and sends exactly `APPROVE ARCHITECTURE`.
+3. The Agent creates or resumes an immutable SourceZip revision and implements against the approved
+  architecture. The latest Mermaid message is pinned into LLM context during long-conversation compaction.
+4. E2B runs .NET restore/build/unit/integration tests and npm/Vitest/Vite, then starts the generated
+  API and Vite preview together for Playwright E2E and desktop/mobile UI capture. The screenshots
+  appear inline in chat.
+5. The user requests UI changes or sends exactly `APPROVE UI`.
+6. The Agent runs ARM what-if. Deployment requires a later exact `DEPLOY <projectSlug>` message.
+7. Azure receives only tested packages. Deployment injects the API URL through `runtime-config.js`;
+  generated backends use `DefaultAzureCredential` for Storage, Cosmos, and Key Vault through the App
+  Service system-assigned managed identity. Deployment verifies a package fingerprint plus Blob,
+  Cosmos, and Key Vault readiness before reporting success.
+
+### Existing project iteration
+
+Projects can be modified or extended in the **same conversation thread**. The Skill calls
+`list_my_files`, selects the newest matching SourceZip, renders a revised architecture, and repeats all
+architecture/UI/deployment approvals. Reusing the same slug incrementally updates deterministic Azure
+resources and publishes newly tested packages. Cross-thread recovery is not currently supported because
+there is no long-lived Project/Revision repository outside conversation artifacts.
+
+The E2B template lives in [backend/sandbox/e2bdocker](backend/sandbox/e2bdocker/README.md). Azure setup,
+the Cosmos deployment profile, identity roles, and publication details are documented in
+[infra/README.md](infra/README.md).
+
+---
+
+## How document generation works
 
 Instead of asking the model for raw HTML and rendering it in a browser sandbox, the tools expose a
 **structured JSON contract**:
@@ -138,9 +180,15 @@ backend/
     Storage/          # Blob storage + SAS download links
     Infrastructure/   # current-user, dev auth handler, JSON defaults
     Configuration/    # options
+  src/MnaiWork.BuildWorker/ # fixed build/test/UI screenshot pipeline
+  src/MnaiWork.E2BRunner/   # sandbox HTTP runner
+  sandbox/e2bdocker/        # E2B template and local verification
   tools/
     GenCheck/         # dev: validates generated files against the OpenXML schema
     OpenAiSmoke/      # dev: validates streaming + function calling against the endpoint
+infra/
+  bootstrap/          # optional least-privilege Agent role setup
+  generated-project/  # reviewed generated-app ARM/Bicep template
 frontend/
   src/
     api/              # typed client + SSE consumer
@@ -162,6 +210,10 @@ dotnet run --project backend/tools/OpenAiSmoke
 ## Security notes
 
 - Secrets are kept in user-secrets / environment variables, never in `appsettings.json`.
+- E2B API key and template ID are read from Key Vault and are never sent into a sandbox.
+- Generated applications use endpoint settings plus `DefaultAzureCredential`; Storage shared-key auth
+  and Cosmos local auth are disabled by ARM.
+- Project builds run in disposable E2B sandboxes without Agent Azure/Cosmos/Key Vault credentials.
 - The dev auth handler is for local development only. In production, configure `AzureAd` so the API
   validates real Entra ID tokens.
 - Download links are short-lived SAS URLs; if SAS cannot be minted the API falls back to an

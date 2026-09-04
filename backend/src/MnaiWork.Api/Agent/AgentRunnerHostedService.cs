@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace MnaiWork.Api.Agent;
 
 /// <summary>
@@ -10,6 +12,7 @@ public sealed class AgentRunnerHostedService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AgentRunnerHostedService> _logger;
     private readonly SemaphoreSlim _gate = new(4);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _threadGates = new();
 
     public AgentRunnerHostedService(
         IAgentRunQueue queue,
@@ -28,8 +31,13 @@ public sealed class AgentRunnerHostedService : BackgroundService
             await _gate.WaitAsync(stoppingToken);
             _ = Task.Run(async () =>
             {
+                var threadGate = _threadGates.GetOrAdd(
+                    request.ThreadId, _ => new SemaphoreSlim(1, 1));
+                var threadLockAcquired = false;
                 try
                 {
+                    await threadGate.WaitAsync(stoppingToken);
+                    threadLockAcquired = true;
                     using var scope = _scopeFactory.CreateScope();
                     var runner = scope.ServiceProvider.GetRequiredService<AgentRunner>();
                     await runner.RunAsync(request, stoppingToken);
@@ -40,6 +48,10 @@ public sealed class AgentRunnerHostedService : BackgroundService
                 }
                 finally
                 {
+                    if (threadLockAcquired)
+                    {
+                        threadGate.Release();
+                    }
                     _gate.Release();
                 }
             }, stoppingToken);

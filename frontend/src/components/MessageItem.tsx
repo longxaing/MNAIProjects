@@ -1,6 +1,7 @@
 import type { Message } from "../api/types";
 import { useChat } from "../store/chat";
 import ArtifactCard from "./ArtifactCard";
+import MarkdownContent from "./MarkdownContent";
 
 function attachmentIcon(kind: string): string {
   switch (kind) {
@@ -56,7 +57,7 @@ export default function MessageItem({ message }: { message: Message }) {
       {!isUser && <div className="avatar bot">MW</div>}
       <div className={`bubble ${isUser ? "user-bubble" : "assistant-bubble"}`}>
         <div className="content">
-          {message.content}
+          <MarkdownContent content={message.content} renderMermaid={!message.streaming} />
           {message.streaming && message.content.length === 0 ? (
             <span className="typing">
               <span></span>

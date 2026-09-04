@@ -1,0 +1,208 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "6468474817409336484"
+    }
+  },
+  "parameters": {
+    "generatedResourceGroupName": {
+      "type": "string",
+      "defaultValue": "rg-mnaiwork-generated-demo",
+      "metadata": {
+        "description": "Resource group used only for generated demo projects."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus2",
+      "metadata": {
+        "description": "Azure region for the resource group and shared App Service Plan."
+      }
+    },
+    "appServicePlanName": {
+      "type": "string",
+      "defaultValue": "asp-mnaiwork-generated-demo",
+      "metadata": {
+        "description": "Shared Linux App Service Plan name."
+      }
+    },
+    "deploymentPrincipalId": {
+      "type": "string",
+      "metadata": {
+        "description": "Object/principal ID of the platform system-assigned managed identity."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('generatedResourceGroupName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleDefinitions",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(subscription().id, 'mnai-generated-project-deployer')]",
+      "properties": {
+        "roleName": "Mnai Generated Project Deployer",
+        "description": "Deploys only App Service, Storage, Cosmos DB for NoSQL, and Key Vault resources.",
+        "type": "CustomRole",
+        "permissions": [
+          {
+            "actions": [
+              "Microsoft.Resources/deployments/*",
+              "Microsoft.Resources/subscriptions/resourceGroups/read",
+              "Microsoft.Resources/subscriptions/resourceGroups/write",
+              "Microsoft.Web/sites/*",
+              "Microsoft.Web/serverFarms/read",
+              "Microsoft.Web/serverFarms/write",
+              "Microsoft.Web/serverFarms/join/action",
+              "Microsoft.Storage/storageAccounts/*",
+              "Microsoft.DocumentDB/databaseAccounts/*",
+              "Microsoft.KeyVault/vaults/*"
+            ],
+            "notActions": [
+              "Microsoft.Storage/storageAccounts/listKeys/action",
+              "Microsoft.Storage/storageAccounts/listAccountSas/action",
+              "Microsoft.Storage/storageAccounts/listServiceSas/action",
+              "Microsoft.Storage/storageAccounts/regeneratekey/action",
+              "Microsoft.DocumentDB/databaseAccounts/listKeys/action",
+              "Microsoft.DocumentDB/databaseAccounts/readonlykeys/action",
+              "Microsoft.DocumentDB/databaseAccounts/regenerateKey/action",
+              "Microsoft.DocumentDB/databaseAccounts/listConnectionStrings/action"
+            ],
+            "dataActions": [],
+            "notDataActions": []
+          }
+        ],
+        "assignableScopes": [
+          "[subscription().id]"
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(subscription().id, parameters('deploymentPrincipalId'), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, 'mnai-generated-project-deployer')))]",
+      "properties": {
+        "principalId": "[parameters('deploymentPrincipalId')]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, 'mnai-generated-project-deployer'))]"
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, 'mnai-generated-project-deployer'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "generated-foundation",
+      "resourceGroup": "[parameters('generatedResourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "appServicePlanName": {
+            "value": "[parameters('appServicePlanName')]"
+          },
+          "deploymentPrincipalId": {
+            "value": "[parameters('deploymentPrincipalId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "9201144152266264836"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the shared App Service Plan."
+              }
+            },
+            "appServicePlanName": {
+              "type": "string",
+              "metadata": {
+                "description": "Shared Linux App Service Plan name."
+              }
+            },
+            "deploymentPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Object/principal ID of the platform system-assigned managed identity."
+              }
+            }
+          },
+          "variables": {
+            "roleAssignmentCondition": "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 4633458b-17de-408a-b874-0445c86b69e6} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal'})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {ba92f5b4-2d11-453d-a403-e96b0029c9fe, 4633458b-17de-408a-b874-0445c86b69e6} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal'}))\r\n"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-11-01",
+              "name": "[parameters('appServicePlanName')]",
+              "location": "[parameters('location')]",
+              "kind": "linux",
+              "sku": {
+                "name": "B1",
+                "tier": "Basic",
+                "size": "B1",
+                "capacity": 1
+              },
+              "properties": {
+                "reserved": true
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('deploymentPrincipalId'), 'generated-rbac-admin')]",
+              "properties": {
+                "principalId": "[parameters('deploymentPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f58310d9-a9f6-439a-9e8d-f62e7b41a168')]",
+                "condition": "[variables('roleAssignmentCondition')]",
+                "conditionVersion": "2.0"
+              }
+            }
+          ],
+          "outputs": {
+            "appServicePlanId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('generatedResourceGroupName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "generatedResourceGroupId": {
+      "type": "string",
+      "value": "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('generatedResourceGroupName'))]"
+    },
+    "appServicePlanId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('generatedResourceGroupName')), 'Microsoft.Resources/deployments', 'generated-foundation'), '2025-04-01').outputs.appServicePlanId.value]"
+    }
+  }
+}

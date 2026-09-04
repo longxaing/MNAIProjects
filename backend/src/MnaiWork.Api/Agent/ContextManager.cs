@@ -43,30 +43,58 @@ public sealed class ContextManager
             return new PreparedContext(null, turns.Select(ToInputItem).ToList());
         }
 
-        // Keep the newest turns within a budget; everything older gets summarized.
+        // Keep the newest turns within a budget; reserve space for the approved architecture that
+        // must remain verbatim as the implementation contract.
+        var architecture = FindLatestArchitecture(turns);
+        var architectureTokens = architecture is null ? 0 : EstimateTokens(architecture.Content);
+        var recentBudget = Math.Max(0, _options.RecentContextTokens - architectureTokens);
         var recent = new List<ChatMessage>();
         var recentTokens = 0;
         for (var i = turns.Count - 1; i >= 0; i--)
         {
+            if (turns[i].Id == architecture?.Id)
+            {
+                continue;
+            }
             var tokens = EstimateTokens(turns[i].Content);
             var haveMinimum = recent.Count >= _options.MinRecentTurns;
-            if (haveMinimum && recentTokens + tokens > _options.RecentContextTokens)
+            if (haveMinimum && recentTokens + tokens > recentBudget)
             {
                 break;
             }
             recent.Insert(0, turns[i]);
             recentTokens += tokens;
         }
+        while (recent.Count > 1 && recentTokens > recentBudget)
+        {
+            recentTokens -= EstimateTokens(recent[0].Content);
+            recent.RemoveAt(0);
+        }
 
-        var older = turns.Take(turns.Count - recent.Count).ToList();
+        var pinnedArchitecture = architecture;
+        var recentIds = recent.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+        var older = turns.Where(message =>
+                !recentIds.Contains(message.Id)
+                && message.Id != pinnedArchitecture?.Id)
+            .ToList();
         var summary = await SummarizeAsync(older, ct);
+        var items = recent.Select(ToInputItem).ToList();
+        if (pinnedArchitecture is not null)
+        {
+            items.Insert(0, ToInputItem(pinnedArchitecture));
+        }
 
         _logger.LogInformation(
             "Context compacted: {Older} older turn(s) summarized, {Recent} kept verbatim (~{Tokens} tokens).",
             older.Count, recent.Count, recentTokens);
 
-        return new PreparedContext(summary, recent.Select(ToInputItem).ToList());
+        return new PreparedContext(summary, items);
     }
+
+    internal static ChatMessage? FindLatestArchitecture(IEnumerable<ChatMessage> messages) =>
+        messages.LastOrDefault(message =>
+            message.Role == MessageRole.Assistant
+            && message.Content.Contains("```mermaid", StringComparison.OrdinalIgnoreCase));
 
     private async Task<string?> SummarizeAsync(IReadOnlyList<ChatMessage> older, CancellationToken ct)
     {
@@ -82,9 +110,11 @@ public sealed class ContextManager
         }
 
         var prompt =
-            "Summarize the earlier part of a conversation between a user and a document-generation " +
-            "assistant. Preserve concrete facts needed to continue: topics, document titles, requested " +
-            "formats (docx/pptx), themes, audience, key content points, and any files already produced. " +
+            "Summarize the earlier part of a conversation with a document and software-factory assistant. " +
+            "Preserve concrete facts needed to continue: project slug, requirements, accepted architecture " +
+            "decisions, API/data contracts, implemented features, approval state, latest source revision and " +
+            "deployment identifiers mentioned by the assistant, deployed URLs, document titles, formats, " +
+            "themes, audience, key content points, and files already produced. " +
             "Write a compact summary (max ~200 words).\n\nConversation:\n" + transcript;
 
         try

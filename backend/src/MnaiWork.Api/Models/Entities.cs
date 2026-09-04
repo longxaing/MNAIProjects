@@ -22,7 +22,13 @@ public enum RunStatus
 public enum ArtifactKind
 {
     Docx,
-    Pptx
+    Pptx,
+    SourceZip,
+    BackendPackage,
+    FrontendPackage,
+    BuildReport,
+    UiScreenshot,
+    DeploymentRecord
 }
 
 /// <summary>Kind of a user-uploaded file.</summary>
@@ -107,6 +113,88 @@ public sealed class User
 
     [JsonPropertyName("lastSeenAt")]
     public DateTimeOffset LastSeenAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Editable software-factory runtime configuration stored as one Cosmos item.</summary>
+public sealed class DeploymentProfile
+{
+    public const string DefaultId = "default";
+
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = DefaultId;
+
+    [JsonPropertyName("azureProvisioningEnabled")]
+    public bool AzureProvisioningEnabled { get; set; }
+
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
+    [JsonPropertyName("subscriptionId")]
+    public string SubscriptionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("generatedResourceGroup")]
+    public string GeneratedResourceGroup { get; set; } = "rg-mnaiwork-generated-demo";
+
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = "eastus2";
+
+    [JsonPropertyName("appServicePlanName")]
+    public string AppServicePlanName { get; set; } = "asp-mnaiwork-generated-demo";
+
+    [JsonPropertyName("deploymentPrincipalId")]
+    public string DeploymentPrincipalId { get; set; } = string.Empty;
+
+    [JsonPropertyName("azureTimeoutMinutes")]
+    public int AzureTimeoutMinutes { get; set; } = 30;
+
+    [JsonPropertyName("buildExecutionEnabled")]
+    public bool BuildExecutionEnabled { get; set; } = true;
+
+    [JsonPropertyName("maxConcurrentBuilds")]
+    public int MaxConcurrentBuilds { get; set; } = 1;
+
+    [JsonPropertyName("commandTimeoutMinutes")]
+    public int CommandTimeoutMinutes { get; set; } = 10;
+
+    [JsonPropertyName("totalTimeoutMinutes")]
+    public int TotalTimeoutMinutes { get; set; } = 30;
+
+    [JsonPropertyName("playwrightVersion")]
+    public string PlaywrightVersion { get; set; } = "1.62.1";
+
+    [JsonPropertyName("azureAdTenantId")]
+    public string AzureAdTenantId { get; set; } = string.Empty;
+
+    [JsonPropertyName("version")]
+    public int Version { get; set; } = 1;
+
+    [JsonPropertyName("updatedBy")]
+    public string UpdatedBy { get; set; } = "system";
+
+    [JsonPropertyName("updatedAt")]
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("_etag")]
+    public string? ETag { get; set; }
+
+    public IReadOnlyDictionary<string, string?> ToConfiguration() =>
+        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AzureProvisioning:Enabled"] = AzureProvisioningEnabled.ToString(),
+            ["AzureProvisioning:TenantId"] = TenantId,
+            ["AzureProvisioning:SubscriptionId"] = SubscriptionId,
+            ["AzureProvisioning:GeneratedResourceGroup"] = GeneratedResourceGroup,
+            ["AzureProvisioning:Location"] = Location,
+            ["AzureProvisioning:AppServicePlanName"] = AppServicePlanName,
+            ["AzureProvisioning:DeploymentPrincipalId"] = DeploymentPrincipalId,
+            ["AzureProvisioning:TimeoutMinutes"] = AzureTimeoutMinutes.ToString(),
+            ["BuildExecution:Enabled"] = BuildExecutionEnabled.ToString(),
+            ["BuildExecution:MaxConcurrentBuilds"] = MaxConcurrentBuilds.ToString(),
+            ["BuildExecution:CommandTimeoutMinutes"] = CommandTimeoutMinutes.ToString(),
+            ["BuildExecution:TotalTimeoutMinutes"] = TotalTimeoutMinutes.ToString(),
+            ["BuildExecution:PlaywrightVersion"] = PlaywrightVersion,
+            ["AzureAd:TenantId"] = AzureAdTenantId
+        };
 }
 
 /// <summary>A conversation. Partitioned by <see cref="UserId"/>.</summary>

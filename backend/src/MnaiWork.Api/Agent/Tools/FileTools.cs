@@ -79,7 +79,7 @@ internal static class ThreadAttachments
     }
 }
 
-/// <summary>Lists the documents/presentations already generated in the current conversation.</summary>
+/// <summary>Lists all artifacts already generated in the current conversation.</summary>
 public sealed class ListMyFilesTool : IAgentTool
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -89,9 +89,10 @@ public sealed class ListMyFilesTool : IAgentTool
     public string Name => "list_my_files";
 
     public string Description =>
-        "List the files (documents and presentations) already generated earlier in THIS conversation, " +
-        "so you can reference or revise one. Returns each file's id, name, kind and size. " +
-        "Use the returned id with read_my_file to inspect a file's contents.";
+        "List all artifacts generated earlier in THIS conversation, including project source ZIP " +
+        "revisions, build reports, screenshots, packages, deployment records, documents, and decks. " +
+        "Returns each artifact's id, name, kind, size, and creation time so the latest project source " +
+        "revision can be recovered for continued iteration.";
 
     public string ParametersSchema => """
     { "type": "object", "properties": {} }

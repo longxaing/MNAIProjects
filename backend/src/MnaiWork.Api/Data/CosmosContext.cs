@@ -20,6 +20,8 @@ public sealed class CosmosContext
         Messages = client.GetContainer(_options.Database, _options.MessagesContainer);
         Runs = client.GetContainer(_options.Database, _options.RunsContainer);
         Users = client.GetContainer(_options.Database, _options.UsersContainer);
+        DeploymentProfiles = client.GetContainer(
+            _options.Database, _options.DeploymentProfilesContainer);
     }
 
     public CosmosClient Client { get; }
@@ -27,6 +29,7 @@ public sealed class CosmosContext
     public Container Messages { get; }
     public Container Runs { get; }
     public Container Users { get; }
+    public Container DeploymentProfiles { get; }
 
     /// <summary>Ensures database and containers exist. Safe to call at startup.</summary>
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -36,5 +39,8 @@ public sealed class CosmosContext
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.MessagesContainer, "/threadId"), cancellationToken: ct);
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.RunsContainer, "/threadId"), cancellationToken: ct);
         await db.CreateContainerIfNotExistsAsync(new ContainerProperties(_options.UsersContainer, "/id"), cancellationToken: ct);
+        await db.CreateContainerIfNotExistsAsync(
+            new ContainerProperties(_options.DeploymentProfilesContainer, "/id"),
+            cancellationToken: ct);
     }
 }

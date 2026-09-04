@@ -1,0 +1,24 @@
+services:
+  e2b-sandbox:
+    container_name: mnaiwork-e2b-sandbox-local
+    build:
+      context: ../..
+      dockerfile: sandbox/e2bdocker/e2b.Dockerfile
+    image: mnaiwork-e2b-sandbox:local
+    working_dir: /home/user/workspace
+    environment:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      CI: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    shm_size: 2gb
+    tmpfs:
+      - /tmp:size=2g
+    volumes:
+      - ./workspace:/home/user/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
