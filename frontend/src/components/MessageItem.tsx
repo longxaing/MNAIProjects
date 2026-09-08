@@ -18,16 +18,25 @@ function attachmentIcon(kind: string): string {
   }
 }
 
-export default function MessageItem({ message }: { message: Message }) {
+export default function MessageItem({
+  message,
+  latestSourceZipIds
+}: {
+  message: Message;
+  latestSourceZipIds: ReadonlySet<string>;
+}) {
   const threadId = useChat((s) => s.currentThreadId) ?? message.threadId;
+  const visibleArtifacts = message.artifacts.filter(
+    (artifact) => artifact.kind !== "sourceZip" || latestSourceZipIds.has(artifact.id)
+  );
 
   if (message.role === "tool") {
-    if (message.artifacts.length === 0) return null;
+    if (visibleArtifacts.length === 0) return null;
     return (
       <div className="row assistant">
         <div className="avatar bot">MW</div>
         <div className="bubble tool-bubble">
-          {message.artifacts.map((a) => (
+          {visibleArtifacts.map((a) => (
             <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
           ))}
         </div>
@@ -47,7 +56,7 @@ export default function MessageItem({ message }: { message: Message }) {
     !isUser &&
     !message.streaming &&
     message.content.trim().length === 0 &&
-    message.artifacts.length === 0
+    visibleArtifacts.length === 0
   ) {
     return null;
   }
@@ -78,7 +87,7 @@ export default function MessageItem({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        {message.artifacts.map((a) => (
+        {visibleArtifacts.map((a) => (
           <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
         ))}
       </div>

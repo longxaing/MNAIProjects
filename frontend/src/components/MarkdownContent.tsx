@@ -1,10 +1,11 @@
-import { useEffect, useId, useState } from "react";
+import { memo, useEffect, useId, useMemo, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 function MermaidDiagram({ source }: { source: string }) {
   const rawId = useId();
   const diagramId = `mermaid-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const normalizedSource = source.replace(/\\n/g, "<br/>");
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
 
@@ -17,10 +18,21 @@ function MermaidDiagram({ source }: { source: string }) {
         theme: "neutral"
       });
       try {
-        const result = await mermaid.render(diagramId, source);
-        if (active) {
-          setSvg(result.svg);
-          setError("");
+        const parsed = await mermaid.parse(normalizedSource, { suppressErrors: true });
+        if (!parsed) throw new Error("Invalid Mermaid syntax.");
+
+        const renderContainer = document.createElement("div");
+        renderContainer.style.cssText =
+          "position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;";
+        document.body.appendChild(renderContainer);
+        try {
+          const result = await mermaid.render(diagramId, normalizedSource, renderContainer);
+          if (active) {
+            setSvg(result.svg);
+            setError("");
+          }
+        } finally {
+          renderContainer.remove();
         }
       } catch (reason) {
         if (active) {
@@ -32,7 +44,7 @@ function MermaidDiagram({ source }: { source: string }) {
     return () => {
       active = false;
     };
-  }, [diagramId, source]);
+  }, [diagramId, normalizedSource]);
 
   if (error) {
     return <pre className="mermaid-error">{source}</pre>;
@@ -46,26 +58,29 @@ function MermaidDiagram({ source }: { source: string }) {
   );
 }
 
-export default function MarkdownContent({
+function MarkdownContent({
   content,
   renderMermaid = true
 }: {
   content: string;
   renderMermaid?: boolean;
 }) {
-  const components: Components = {
-    code({ className, children, ...props }) {
-      const language = /language-([^\s]+)/.exec(className ?? "")?.[1];
-      if (language === "mermaid" && renderMermaid) {
-        return <MermaidDiagram source={String(children).trim()} />;
+  const components = useMemo<Components>(
+    () => ({
+      code({ className, children, ...props }) {
+        const language = /language-([^\s]+)/.exec(className ?? "")?.[1];
+        if (language === "mermaid" && renderMermaid) {
+          return <MermaidDiagram source={String(children).trim()} />;
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
       }
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    }
-  };
+    }),
+    [renderMermaid]
+  );
 
   return (
     <Markdown remarkPlugins={[remarkGfm]} components={components}>
@@ -73,3 +88,5 @@ export default function MarkdownContent({
     </Markdown>
   );
 }
+
+export default memo(MarkdownContent);

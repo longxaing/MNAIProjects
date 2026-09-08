@@ -11,6 +11,23 @@ namespace MnaiWork.Api.Tests;
 public sealed class DeploymentProfileServiceTests
 {
     [Fact]
+    public void AzureOpenAiOptions_DefaultToolIterationBudgetSupportsSoftwareFactory()
+    {
+        var options = new AzureOpenAiOptions();
+
+        Assert.Equal(30, options.MaxToolIterations);
+    }
+
+    [Fact]
+    public void BuildExecutionOptions_DefaultTimeoutsSupportColdSandboxBuilds()
+    {
+        var options = new BuildExecutionOptions();
+
+        Assert.Equal(15, options.CommandTimeoutMinutes);
+        Assert.Equal(45, options.TotalTimeoutMinutes);
+    }
+
+    [Fact]
     public async Task ReplaceAsync_UpdatesCosmosProfileAndReloadsRuntimeOptions()
     {
         var initial = ValidProfile();

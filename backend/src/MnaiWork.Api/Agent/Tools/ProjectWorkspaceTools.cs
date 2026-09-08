@@ -142,7 +142,9 @@ public sealed class UpdateProjectWorkspaceTool : IAgentTool
 
     public string Description =>
         "Create or update an immutable generated-project source ZIP. Supply complete UTF-8 text " +
-        "files. To continue editing, pass the latest sourceArchiveFileId returned by this tool.";
+        "files. Batch all files for one logical implementation or repair into a single call; each " +
+        "call creates a complete source revision. To continue editing, pass the latest " +
+        "sourceArchiveFileId returned by this tool.";
 
     public string ParametersSchema => """
     {
@@ -201,7 +203,9 @@ public sealed class UpdateProjectWorkspaceTool : IAgentTool
         {
             var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
             var history = await messages.ListAsync(context.ThreadId, ct);
-            var approvalError = SoftwareFactoryApprovals.ValidateArchitecture(history);
+            var approvalError = SoftwareFactoryApprovals.ValidateSourceChangeAuthorization(
+                history,
+                request.ProjectSlug);
             if (approvalError is not null)
             {
                 return ToolResult.Fail(approvalError);
@@ -250,7 +254,7 @@ public sealed class UpdateProjectWorkspaceTool : IAgentTool
             ct);
         return ToolResult.Ok(
             $"Project workspace updated. sourceArchiveFileId={artifact.Id}; " +
-            $"files={files.Count}; sizeBytes={archive.Length}.",
+            $"changedFiles={request.Files.Count}; totalFiles={files.Count}; sizeBytes={archive.Length}.",
             artifact);
     }
 
@@ -474,15 +478,8 @@ public sealed class BuildTestProjectTool : IAgentTool
 
             if (!response.Succeeded)
             {
-                var failedStep = response.Steps.LastOrDefault(step => !step.Succeeded);
-                var diagnostic = failedStep?.Output ?? response.Summary;
-                if (diagnostic.Length > 12_000)
-                {
-                    diagnostic = diagnostic[^12_000..];
-                }
                 return ToolResult.Fail(
-                    $"Build/test failed. buildReportFileId={report.Id}. {response.Summary}\n" +
-                    $"Failed-stage output:\n{diagnostic}",
+                    BuildFailureDiagnostics.Create(response, report.Id),
                     new[] { report });
             }
 
@@ -576,6 +573,64 @@ public sealed class BuildTestProjectTool : IAgentTool
     }
 }
 
+internal static class BuildFailureDiagnostics
+{
+    private static readonly Regex AnsiEscape = new(
+        "\\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\\[[0-?]*[ -/]*[@-~])",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
+    public static string Create(BuildProjectResponse response, string reportId)
+    {
+        var failedStep = response.Steps.LastOrDefault(step => !step.Succeeded);
+        var raw = failedStep?.Output ?? response.Summary;
+        var diagnostic = AnsiEscape.Replace(raw, string.Empty).Trim();
+        if (diagnostic.Length > 12_000)
+        {
+            diagnostic = "[earlier output truncated]\n" + diagnostic[^12_000..];
+        }
+
+        var signature = ExtractSignature(diagnostic, response.Summary);
+        var passedStages = string.Join(
+            ", ",
+            response.Steps.Where(step => step.Succeeded).Select(step => step.Name));
+        return $"""
+            Build/test failed. Do not ask the user to diagnose it and do not change the architecture.
+            buildReportFileId={reportId}
+            failedStage={failedStep?.Name ?? "pipeline setup"}
+            exitCode={failedStep?.ExitCode.ToString() ?? "not available"}
+            passedStages={passedStages}
+            summary={response.Summary}
+
+            failureSignature:
+            {signature}
+
+            failedStageDiagnostic:
+            {diagnostic}
+
+            Repair the latest SourceZip using this evidence. Update all implicated product and test
+            files together, preserve valid tests and deployment contracts, then rerun build_test_project.
+            """;
+    }
+
+    private static string ExtractSignature(string diagnostic, string fallback)
+    {
+        var significant = diagnostic
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("exception", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("expected", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("received", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("locator", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("HTTP 5", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal)
+            .Take(24)
+            .ToList();
+        return significant.Count > 0 ? string.Join('\n', significant) : fallback;
+    }
+}
+
 internal static class ProjectArchive
 {
     private const int MaxFiles = 500;
@@ -661,6 +716,7 @@ internal static class ProjectArchive
 internal static class SoftwareFactoryApprovals
 {
     public const string ArchitecturePhrase = "APPROVE ARCHITECTURE";
+    public const string ContinueRepairPrefix = "CONTINUE REPAIR ";
     public const string UiPhrase = "APPROVE UI";
 
     public static string? ValidateArchitecture(IReadOnlyList<ChatMessage> history)
@@ -668,19 +724,39 @@ internal static class SoftwareFactoryApprovals
         var architecture = history.LastOrDefault(message =>
             message.Role == MessageRole.Assistant
             && message.Content.Contains("```mermaid", StringComparison.OrdinalIgnoreCase));
-        var latestUser = history.LastOrDefault(message => message.Role == MessageRole.User);
         if (architecture?.Content.Length > 30_000)
         {
             return "The Mermaid architecture proposal is too large. Render a concise diagram before approval.";
         }
-        return architecture is not null
-               && latestUser is not null
-               && latestUser.Sequence > architecture.Sequence
-               && string.Equals(
-                   latestUser.Content.Trim(), ArchitecturePhrase, StringComparison.Ordinal)
+        var approval = history.LastOrDefault(message =>
+            message.Role == MessageRole.User
+            && architecture is not null
+            && message.Sequence > architecture.Sequence
+            && string.Equals(
+                message.Content.Trim(), ArchitecturePhrase, StringComparison.Ordinal));
+        return architecture is not null && approval is not null
             ? null
             : $"Show a Mermaid architecture diagram and wait for the user to send exactly " +
               $"'{ArchitecturePhrase}' before creating the project workspace.";
+    }
+
+    public static string? ValidateSourceChangeAuthorization(
+        IReadOnlyList<ChatMessage> history,
+        string projectSlug)
+    {
+        var architecture = history.LastOrDefault(message =>
+            message.Role == MessageRole.Assistant
+            && message.Content.Contains("```mermaid", StringComparison.OrdinalIgnoreCase));
+        var approval = history.LastOrDefault(message =>
+            message.Role == MessageRole.User
+            && architecture is not null
+            && message.Sequence > architecture.Sequence
+            && string.Equals(
+                message.Content.Trim(), ArchitecturePhrase, StringComparison.Ordinal));
+        return architecture is not null && approval is not null
+            ? null
+            : $"The latest Mermaid architecture must be approved with exact phrase " +
+              $"'{ArchitecturePhrase}' before changing project '{projectSlug}'.";
     }
 
     public static string? ValidateLatestSourceRevision(

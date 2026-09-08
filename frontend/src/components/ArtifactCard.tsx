@@ -2,6 +2,17 @@ import { useEffect, useState } from "react";
 import { downloadArtifact, getArtifactViewUrl } from "../api/client";
 import type { Artifact } from "../api/types";
 
+const ARTIFACT_LABELS: Record<Artifact["kind"], string> = {
+  docx: "DOCX",
+  pptx: "PPTX",
+  sourceZip: "SOURCE",
+  backendPackage: "API",
+  frontendPackage: "WEB",
+  buildReport: "REPORT",
+  uiScreenshot: "IMAGE",
+  deploymentRecord: "DEPLOY"
+};
+
 export default function ArtifactCard({
   artifact,
   threadId
@@ -51,6 +62,7 @@ export default function ArtifactCard({
             <small>{kb} KB</small>
           </span>
           <button
+            type="button"
             className="artifact-dl"
             onClick={() => void downloadArtifact(threadId, artifact.id, artifact.fileName)}
           >
@@ -63,7 +75,7 @@ export default function ArtifactCard({
 
   return (
     <div className="artifact">
-      <div className={`artifact-badge ${artifact.kind}`}>{artifact.kind.toUpperCase()}</div>
+      <div className={`artifact-badge ${artifact.kind}`}>{ARTIFACT_LABELS[artifact.kind]}</div>
       <div className="artifact-meta">
         <div className="artifact-name" title={artifact.fileName}>
           {artifact.fileName}
@@ -71,6 +83,7 @@ export default function ArtifactCard({
         <div className="artifact-sub">{kb} KB</div>
       </div>
       <button
+        type="button"
         className="artifact-dl"
         onClick={() => void downloadArtifact(threadId, artifact.id, artifact.fileName)}
       >

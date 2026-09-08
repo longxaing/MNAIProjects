@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -77,6 +78,12 @@ public sealed class E2BSandboxClient : IE2BSandboxClient
             throw new HttpRequestException(
                 "E2B create response contained an invalid sandboxID or omitted trafficAccessToken.");
         }
+
+        _logger.LogInformation(
+            "E2B sandbox {SandboxId} created from template {TemplateId} with timeout {TimeoutSeconds}s.",
+            created.SandboxId,
+            templateId,
+            Math.Max(1, (int)Math.Ceiling(timeout.TotalSeconds)));
 
         return new Session(
             _http,
@@ -160,6 +167,7 @@ public sealed class E2BSandboxClient : IE2BSandboxClient
             CancellationToken ct)
         {
             var runnerUri = new Uri($"https://3000-{_sandboxId}.e2b.app/build");
+            var stopwatch = Stopwatch.StartNew();
             using var request = new HttpRequestMessage(HttpMethod.Post, runnerUri);
             request.Headers.Add("e2b-traffic-access-token", _trafficAccessToken);
             request.Content = JsonContent.Create(requestBody, options: JsonOptions);
@@ -170,8 +178,19 @@ public sealed class E2BSandboxClient : IE2BSandboxClient
                 ct);
             await EnsureSuccessAsync(response, "execute E2B build", ct);
             await response.Content.LoadIntoBufferAsync(MaxBuildResponseBytes);
-            return await response.Content.ReadFromJsonAsync<BuildProjectResponse>(JsonOptions, ct)
+            var result = await response.Content.ReadFromJsonAsync<BuildProjectResponse>(JsonOptions, ct)
                 ?? throw new HttpRequestException("E2B runner returned an empty build response.");
+            stopwatch.Stop();
+            var failedStep = result.Steps.LastOrDefault(step => !step.Succeeded);
+            _logger.LogInformation(
+                "E2B runner completed for sandbox {SandboxId} in {DurationMilliseconds}ms. " +
+                "PipelineSucceeded={PipelineSucceeded}; StepCount={StepCount}; FailedStep={FailedStep}.",
+                _sandboxId,
+                stopwatch.ElapsedMilliseconds,
+                result.Succeeded,
+                result.Steps.Count,
+                failedStep?.Name ?? "none");
+            return result;
         }
 
         public async ValueTask DisposeAsync()
@@ -182,6 +201,7 @@ public sealed class E2BSandboxClient : IE2BSandboxClient
             }
 
             await DeleteSandboxAsync(_http, _apiKey, _sandboxId, _logger);
+            _logger.LogInformation("E2B sandbox {SandboxId} deleted.", _sandboxId);
         }
     }
 

@@ -78,11 +78,11 @@ public sealed class BuildExecutor
 
         using var slot = await AcquireBuildSlotAsync(ct);
         var timeout = TimeSpan.FromMinutes(Math.Clamp(
-            _configuration.GetValue("BuildExecution:TotalTimeoutMinutes", 30), 1, 60));
+            _configuration.GetValue("BuildExecution:TotalTimeoutMinutes", 45), 1, 60));
         request = request with
         {
             CommandTimeoutMinutes = Math.Clamp(
-                _configuration.GetValue("BuildExecution:CommandTimeoutMinutes", 10), 1, 30),
+                _configuration.GetValue("BuildExecution:CommandTimeoutMinutes", 15), 1, 30),
             TotalTimeoutMinutes = (int)timeout.TotalMinutes,
             PlaywrightVersion = _configuration["BuildExecution:PlaywrightVersion"] ?? "1.62.1"
         };
@@ -91,11 +91,34 @@ public sealed class BuildExecutor
 
         try
         {
+            _logger.LogInformation(
+                "Starting E2B pipeline. TotalTimeoutMinutes={TotalTimeoutMinutes}; " +
+                "CommandTimeoutMinutes={CommandTimeoutMinutes}; PlaywrightVersion={PlaywrightVersion}.",
+                request.TotalTimeoutMinutes,
+                request.CommandTimeoutMinutes,
+                request.PlaywrightVersion);
             await using var sandbox = await _sandboxes.CreateAsync(
                 templateId,
                 timeout,
                 totalTimeout.Token);
-            return await sandbox.BuildAsync(request, totalTimeout.Token);
+            var result = await sandbox.BuildAsync(request, totalTimeout.Token);
+            var failedStep = result.Steps.LastOrDefault(step => !step.Succeeded);
+            if (result.Succeeded)
+            {
+                _logger.LogInformation(
+                    "E2B pipeline passed all {StepCount} stages. BuildId={BuildId}.",
+                    result.Steps.Count,
+                    result.BuildId ?? "missing");
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "E2B transport succeeded but the sandbox pipeline failed. " +
+                    "FailedStep={FailedStep}; Summary={Summary}.",
+                    failedStep?.Name ?? "unknown",
+                    result.Summary);
+            }
+            return result;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

@@ -68,11 +68,10 @@ export const useChat = create<ChatState>((set, get) => {
         break;
       }
       case "tool": {
-        const label =
-          event.toolStatus === "started"
-            ? `Generating with ${event.tool}…`
-            : `${event.tool} ${event.toolStatus}`;
-        set({ toolActivity: event.toolStatus === "completed" ? null : label });
+        set({
+          toolActivity:
+            event.toolStatus === "started" ? `Generating with ${event.tool}…` : null
+        });
         break;
       }
       case "artifact": {
@@ -227,7 +226,12 @@ export const useChat = create<ChatState>((set, get) => {
       streamController = controller;
 
       try {
-        const { runId } = await api.sendMessage(threadId, trimmed, attachments);
+        const { runId, userMessageId } = await api.sendMessage(threadId, trimmed, attachments);
+        set({
+          messages: get().messages.map((message) =>
+            message.id === optimistic.id ? { ...message, id: userMessageId, runId } : message
+          )
+        });
         await streamRun(threadId, runId, apply, controller.signal);
       } catch (err) {
         if (!controller.signal.aborted) {
@@ -239,8 +243,14 @@ export const useChat = create<ChatState>((set, get) => {
         // Reconcile with the authoritative persisted state.
         if (get().currentThreadId === threadId) {
           try {
-            const messages = await api.getMessages(threadId);
-            set({ messages });
+            const persistedMessages = await api.getMessages(threadId);
+            const reconciled = new Map(get().messages.map((message) => [message.id, message]));
+            for (const message of persistedMessages) reconciled.set(message.id, message);
+            set({
+              messages: [...reconciled.values()].sort(
+                (left, right) => left.sequence - right.sequence
+              )
+            });
           } catch {
             /* keep optimistic view */
           }

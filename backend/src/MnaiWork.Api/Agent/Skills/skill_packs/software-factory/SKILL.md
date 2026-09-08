@@ -1,7 +1,7 @@
 ---
 name: software-factory
 description: "Create, test, and deploy React plus ASP.NET Core demo projects. Use for requests to build application code, write unit/integration/E2E tests, provision the fixed Azure infrastructure, or publish a generated project."
-version: 1.1.0
+version: 1.2.0
 category: engineering
 author: MnaiWork
 ---
@@ -35,12 +35,18 @@ Execute stages in order. Never report a later stage as complete unless its tool 
    - Convert the request into concrete user flows and acceptance criteria.
    - Ask a question only when a missing answer changes architecture or observable behavior.
 2. **Architecture review**
-    - Before creating or editing any project source, respond with a concrete architecture proposal.
+   - Before creating a project, or before editing source for an architectural change, respond with a
+      concrete architecture proposal. Do not repeat this step for implementation-only changes covered
+      by the currently approved architecture.
     - Include a fenced `mermaid` flowchart showing the React frontend, ASP.NET Core API, API contract,
        managed identity, Storage, Cosmos DB, Key Vault, test layers, E2B build, and Azure publication.
+         Use quoted node labels and `<br/>` for label line breaks. Never use literal `\n` sequences in
+         Mermaid nodes or subgraph titles.
     - Explain the main boundaries and tradeoffs briefly, then ask the user to raise corrections or send
        exactly `APPROVE ARCHITECTURE`. End the current turn. Do not call `create_project_workspace`,
        `update_project_workspace`, or any build/deployment tool in that turn.
+    - End immediately after the approval request. Do not ask the user to choose a language/framework,
+       offer another stack, propose a simplified implementation, or append additional next steps.
     - If the user requests changes, revise and render the architecture again, then wait for a fresh exact
        `APPROVE ARCHITECTURE` message.
       - The exact approved Mermaid message is an implementation contract and is pinned into later LLM
@@ -53,17 +59,52 @@ Execute stages in order. Never report a later stage as complete unless its tool 
        package lock, or test harness from scratch.
     - Modify source files with `update_project_workspace`; keep the newest returned
        `sourceArchiveFileId` as the only current revision.
+    - Each update creates a complete immutable source snapshot. Group every related frontend,
+       backend, and test change for the current implementation or repair into one
+       `update_project_workspace` call. Never split one logical change into one call per file, and
+       do not create another revision until build evidence or a new user request requires it.
     - Use `read_project_workspace` to inspect files before targeted repairs.
     - Use the fixed layout: `GeneratedApp.sln`, `src/backend`, `src/frontend`,
        `tests/backend.unit`, and `tests/backend.integration`.
 4. **Implementation**
    - Implement frontend and backend together against an explicit API contract.
    - Do not place secrets or Azure credentials in generated code.
+   - Build the complete user-facing workflow from the approved requirements, not a developer demo or
+      API exerciser. Never expose raw author/user IDs as the primary UX when the application can derive
+      identity from its authenticated user or Development test persona. Do not present a publish-only
+      screen when the requested workflow also requires browsing, friendship, history, or management.
+   - Give every generated frontend a deliberate, domain-specific visual direction. Do not ship an
+      unstyled browser-default form. Define a compact design system in CSS with typography, spacing,
+      foreground/background/surface/accent/status colors, borders, focus states, and responsive
+      breakpoints. Use a purposeful font stack, strong information hierarchy, and restrained motion;
+      avoid generic purple gradients, decorative blobs, oversized marketing heroes, and nested cards.
+   - Make the first viewport the usable application. Provide navigation for all primary workflows,
+      polished empty/loading/error/success/disabled states, accessible labels and keyboard focus, and
+      touch-friendly controls. Desktop and mobile must preserve the same capabilities without overlap,
+      clipped text, horizontal page scrolling, or layout shifts.
+   - Match interaction patterns to the domain: feeds should be scannable, composers should make the
+      primary action obvious, destructive actions need confirmation, and identity/status should be
+      visible without asking users for implementation identifiers. Use icons only when their meaning is
+      familiar or accompanied by an accessible label.
+    - Read the current template `Program.cs` before changing startup. Preserve its health, readiness,
+       Azure client, CORS, and deployment-manifest code. Add registrations and middleware directly, or
+       include the complete extension-method implementation in the same source revision. Never call
+       invented helpers such as `AddDefaultServices` or `UseDefaultPipeline` unless their definitions
+       are present in the workspace and compile against the current template.
     - Preserve the template managed-identity contract. The backend must reference Azure.Identity,
        Azure.Storage.Blobs, Microsoft.Azure.Cosmos, and Azure.Security.KeyVault.Secrets; construct
        BlobServiceClient, CosmosClient, and SecretClient with one DefaultAzureCredential; and read only
        `Storage:ServiceUri`, `Cosmos:Endpoint`, and `KeyVault:Uri`. Never use account keys, connection
        strings, SAS tokens, client secrets, or Cosmos keys.
+    - Production persistence is mandatory. Store all durable structured application data in the
+       configured Cosmos database/container through the injected `CosmosClient`. For a blog, this
+       includes posts, users/profile data needed by the app, friendships, visibility, comments, and
+       likes when those features exist. In-memory repositories are permitted only behind an explicit
+       Development/test environment branch and must never be the Production registration.
+    - Use Blob Storage for durable unstructured/binary application objects such as uploaded images or
+       generated files. Do not duplicate text-only records into Blob merely to use the provisioned
+       service; a text-only blog uses Cosmos for its business data while Blob remains part of the fixed
+       infrastructure and `/ready` dependency contract.
     - Preserve the template CORS contract: read `Frontend:Origin`, register CORS for that exact origin,
        and call `UseCors`. ARM supplies the deployed Storage static-site origin.
     - Preserve `/runtime-config.js` and the typed `window.__APP_CONFIG__.apiBaseUrl` reader. Frontend API
@@ -80,6 +121,15 @@ Execute stages in order. Never report a later stage as complete unless its tool 
    - Add backend unit tests for business rules and failure paths.
    - Add integration tests for HTTP, auth, validation, and persistence boundaries.
    - Add Playwright E2E tests for every acceptance criterion that is practical through the UI.
+   - Treat template tests as placeholders, not product coverage. Before the first build, inspect and
+      update every retained template assertion so it matches the generated product. In particular,
+      replace placeholder names such as `Generated App`, sample Calculator assertions, and generic
+      render-only E2E checks unless that behavior remains intentionally relevant. Product code, visible
+      labels, selectors, and tests must be changed together in the same source revision.
+   - Playwright must exercise the actual primary workflow, not merely assert that a heading or button
+      exists. Cover navigation, a successful create/read flow, one validation or failure state, and the
+      resulting visible data. Add desktop and mobile assertions for primary navigation and ensure the
+      page has no horizontal overflow or uncaught browser errors.
     - The E2B runner starts the generated API on `http://127.0.0.1:5000` and Vite preview on port 4173.
        Generated code must provide Development-only local/in-memory implementations for persistence or
        external dependencies so E2E tests never require Agent Azure credentials or production resources.
@@ -87,13 +137,35 @@ Execute stages in order. Never report a later stage as complete unless its tool 
    - Call `build_test_project`; a disposable E2B sandbox runs restore, build, backend
      unit/integration tests, frontend Vitest, frontend build, Playwright E2E, and publish.
    - Fix product code when tests fail. Never delete, skip, or weaken a valid test merely to pass.
-   - For a failed stage, inspect its returned output, update the latest source revision, and retry.
-     Stop after three repair cycles and report the remaining evidence.
+      - For a failed stage, inspect the latest BuildReport and define its failure signature from the failed
+         stage plus primary compiler/test error codes and messages. Update all files implicated by that
+         diagnostic together in one source revision, then rerun the complete pipeline.
+      - Continue repairing while the failure signature changes or the error count/stage shows measurable
+         progress. There is no fixed three-cycle limit. Stop when the same failure signature appears in two
+         consecutive builds despite a relevant repair, when no safe targeted repair remains, or when the
+         server run budget is exhausted. Report the remaining evidence and ask the user to send exactly
+         `CONTINUE REPAIR <projectSlug>` to authorize another repair run against the same approved
+         architecture and latest SourceZip. On that exact continuation, load this skill, read the latest
+         SourceZip and BuildReport, and continue targeted repair without rendering a new architecture or
+         asking for `APPROVE ARCHITECTURE` again. A feature, requirement, API, data-model, identity, or
+         topology change still requires a revised architecture and fresh architecture approval.
     - A successful build returns desktop and mobile UI screenshot artifacts captured from Vite preview
-       inside E2B. Show both screenshots to the user, summarize visible behavior, and ask for corrections
-       or the exact phrase `APPROVE UI`. End the turn without calling `preview_azure_project`.
+       inside E2B. Inspect both screenshots before presenting them. If either looks like an unstyled
+       browser-default form, omits an approved primary workflow, has excessive empty space, weak
+       hierarchy, overlap, clipping, or unusable mobile composition, improve the frontend and rerun the
+       pipeline instead of asking for approval. Once acceptable, show both screenshots, summarize visible
+       behavior, and ask for corrections or the exact phrase `APPROVE UI`. End the turn without calling
+       `preview_azure_project`.
     - If the user requests UI changes, update source, rerun the complete build/test/screenshot pipeline,
        show the new screenshots, and wait for a fresh exact `APPROVE UI` message.
+    - The latest approved architecture remains the implementation contract across later turns. Styling,
+       copy, accessibility, test, and bug-fix changes that preserve requirements, API contracts, data
+       models, identity boundaries, Azure resources, and topology may update the latest SourceZip
+       directly without rendering or approving the same architecture again. After any source change,
+       rerun the complete pipeline and require a fresh `APPROVE UI` before Azure preview.
+    - If a requested change affects requirements, observable workflows, API contracts, durable data
+       models, identity/authorization boundaries, Azure resources, or topology, render the revised
+       architecture and require a fresh `APPROVE ARCHITECTURE` before editing source.
 7. **Infrastructure preview**
     - `preview_azure_project` is server-gated and fails unless the latest user message after the matching
        successful build with two screenshots is exactly `APPROVE UI`.

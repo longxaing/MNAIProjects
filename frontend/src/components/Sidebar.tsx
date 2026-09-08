@@ -44,7 +44,9 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-foot">
-        <div className="user">{authEnabled ? account?.username ?? "Signed in" : "Local dev mode"}</div>
+        <div className="sidebar-user">
+          {authEnabled ? account?.username ?? "Signed in" : "Local dev mode"}
+        </div>
         {authEnabled && (
           <button className="logout" onClick={logout}>
             Sign out

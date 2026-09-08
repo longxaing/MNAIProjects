@@ -26,7 +26,7 @@ public sealed class AzureOpenAiOptions
     public string Deployment { get; set; } = "gpt-5.1";
 
     /// <summary>Max ReAct iterations (model &lt;-&gt; tool round trips) per run.</summary>
-    public int MaxToolIterations { get; set; } = 8;
+    public int MaxToolIterations { get; set; } = 30;
 
     /// <summary>Approx history size (in tokens) above which older turns get summarized.</summary>
     public int MaxContextTokens { get; set; } = 100000;
@@ -144,8 +144,8 @@ public sealed class BuildExecutionOptions
 
     public bool Enabled { get; set; }
     public int MaxConcurrentBuilds { get; set; } = 1;
-    public int CommandTimeoutMinutes { get; set; } = 10;
-    public int TotalTimeoutMinutes { get; set; } = 30;
+    public int CommandTimeoutMinutes { get; set; } = 15;
+    public int TotalTimeoutMinutes { get; set; } = 45;
     public string PlaywrightVersion { get; set; } = "1.62.1";
 }
 

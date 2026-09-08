@@ -24,7 +24,7 @@ public sealed class SoftwareFactorySkill : IAgentSkill
         "Create, test, and deploy React plus ASP.NET Core demo projects using a mandatory " +
         "code, test, Azure what-if, approval, and deployment workflow.";
 
-    public string Version => "1.1.0";
+    public string Version => "1.2.0";
     public string Category => "engineering";
 
     public IReadOnlySet<string> ToolNames { get; } = new HashSet<string>(
@@ -116,9 +116,11 @@ public sealed class AgentSkillRegistry
 
         return $$"""
         ## Server-side skills
-        Skills are specialized server-side workflow packs. When a user request matches a listed
-        skill, call `load_skill` before attempting its specialized tools. Follow the loaded skill's
-        workflow exactly. A skill coordinates tools; it does not make unavailable tools real.
+        Skills are specialized server-side workflow packs. Calling a matching skill is mandatory, not
+        optional. For any request to create, modify, test, or deploy an application, website, frontend,
+        backend, API, or software project, the first action MUST be `load_skill` with `skillName` set to
+        `software-factory`. Do not answer from generic software knowledge before loading it. Follow the
+        loaded workflow exactly. A skill coordinates tools; it does not make unavailable tools real.
 
         Available skills:
         {{catalog}}

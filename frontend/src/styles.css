@@ -22,6 +22,7 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -40,7 +41,9 @@ button {
 .app {
   display: grid;
   grid-template-columns: 288px 1fr;
-  height: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-loading {
@@ -147,6 +150,8 @@ button {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px;
   gap: 14px;
 }
@@ -273,7 +278,7 @@ button {
   gap: 8px;
 }
 
-.user {
+.sidebar-user {
   font-size: 13px;
   color: var(--muted);
   overflow: hidden;
@@ -300,7 +305,9 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100%;
+  min-height: 0;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -354,7 +361,9 @@ button {
 /* ---------- Messages ---------- */
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -511,7 +520,8 @@ button {
 
 /* ---------- Artifact card ---------- */
 .artifact {
-  display: flex;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   margin-top: 10px;
@@ -519,17 +529,20 @@ button {
   background: var(--surface-hi);
   border: 1px solid var(--border);
   border-radius: 12px;
-  min-width: 280px;
+  width: min(460px, 100%);
+  min-width: 0;
 }
 
 .artifact-badge {
-  width: 42px;
+  width: 48px;
   height: 42px;
   border-radius: 9px;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
   color: white;
 }
 
@@ -539,6 +552,20 @@ button {
 
 .artifact-badge.docx {
   background: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.artifact-badge.sourceZip,
+.artifact-badge.buildReport {
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+}
+
+.artifact-badge.backendPackage,
+.artifact-badge.frontendPackage {
+  background: linear-gradient(135deg, #059669, #22c55e);
+}
+
+.artifact-badge.deploymentRecord {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
 }
 
 .artifact-meta {
@@ -571,6 +598,17 @@ button {
 .artifact-dl:hover {
   border-color: var(--brand);
   background: rgba(99, 102, 241, 0.12);
+}
+
+@media (max-width: 560px) {
+  .artifact {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .artifact-dl {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 
 .ui-screenshot {

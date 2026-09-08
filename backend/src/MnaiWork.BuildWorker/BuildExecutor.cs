@@ -15,8 +15,8 @@ public sealed record BuildProjectRequest(
     string SolutionPath,
     string BackendProjectPath,
     string FrontendDirectory,
-    int CommandTimeoutMinutes = 10,
-    int TotalTimeoutMinutes = 30,
+    int CommandTimeoutMinutes = 15,
+    int TotalTimeoutMinutes = 45,
     string PlaywrightVersion = "1.62.1");
 
 public sealed record BuildStepResult(
@@ -140,7 +140,7 @@ public sealed class LocalBuildPipeline
 
         using var totalTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         totalTimeout.CancelAfter(TimeSpan.FromMinutes(Math.Clamp(
-            _configuration.GetValue("BuildExecution:TotalTimeoutMinutes", 30), 1, 60)));
+            _configuration.GetValue("BuildExecution:TotalTimeoutMinutes", 45), 1, 60)));
 
         try
         {
@@ -187,15 +187,17 @@ public sealed class LocalBuildPipeline
             }
 
             (byte[] Desktop, byte[] Mobile)? screenshots;
-            using (var backend = StartBackendProcess(backendProject, root))
+            var backend = StartBackendProcess(backendProject, root);
+            using (backend.Process)
             {
                 try
                 {
                     await WaitForProcessEndpointAsync(
-                        backend, "http://127.0.0.1:5000/health", "backend", totalTimeout.Token);
+                        backend.Process, "http://127.0.0.1:5000/health", "backend", totalTimeout.Token);
                     if (!await RunNpmRequiredAsync(steps, "Playwright E2E",
                             new[] { "run", "test:e2e" }, frontend, totalTimeout.Token))
                     {
+                        AppendBackendOutput(steps, backend.Output);
                         return Failed(steps);
                     }
                     screenshots = await CaptureUiScreenshotsAsync(
@@ -207,8 +209,8 @@ public sealed class LocalBuildPipeline
                 }
                 finally
                 {
-                    TryKill(backend);
-                    await WaitForExitIgnoringErrorsAsync(backend);
+                    TryKill(backend.Process);
+                    await WaitForExitIgnoringErrorsAsync(backend.Process);
                 }
             }
 
@@ -450,7 +452,9 @@ public sealed class LocalBuildPipeline
         return process;
     }
 
-    private Process StartBackendProcess(string backendProject, string workingDirectory)
+    private (Process Process, StringBuilder Output) StartBackendProcess(
+        string backendProject,
+        string workingDirectory)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -473,14 +477,50 @@ public sealed class LocalBuildPipeline
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         startInfo.Environment["Frontend__Origin"] = "http://127.0.0.1:4173";
         startInfo.Environment["Deployment__Fingerprint"] = "local";
+        var output = new StringBuilder();
         var process = new Process { StartInfo = startInfo };
+        process.OutputDataReceived += (_, eventArgs) => AppendProcessLine(output, eventArgs.Data);
+        process.ErrorDataReceived += (_, eventArgs) => AppendProcessLine(output, eventArgs.Data);
         if (!process.Start())
         {
             throw new InvalidOperationException("Unable to start generated backend for E2E tests.");
         }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        return process;
+        return (process, output);
+    }
+
+    private static void AppendProcessLine(StringBuilder output, string? line)
+    {
+        if (line is null)
+        {
+            return;
+        }
+        lock (output)
+        {
+            if (output.Length < MaxStepOutputChars)
+            {
+                output.AppendLine(line);
+            }
+        }
+    }
+
+    private static void AppendBackendOutput(List<BuildStepResult> steps, StringBuilder output)
+    {
+        string text;
+        lock (output)
+        {
+            text = output.ToString();
+        }
+        if (steps.Count == 0 || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+        var step = steps[^1];
+        steps[^1] = step with
+        {
+            Output = step.Output + "\n\nGenerated API output:\n" + text
+        };
     }
 
     private static async Task WaitForFrontendAsync(Process preview, CancellationToken ct)
@@ -584,7 +624,7 @@ public sealed class LocalBuildPipeline
 
         using var commandTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         commandTimeout.CancelAfter(TimeSpan.FromMinutes(Math.Clamp(
-            _configuration.GetValue("BuildExecution:CommandTimeoutMinutes", 10), 1, 30)));
+            _configuration.GetValue("BuildExecution:CommandTimeoutMinutes", 15), 1, 30)));
         try
         {
             await process.WaitForExitAsync(commandTimeout.Token);

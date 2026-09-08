@@ -110,13 +110,13 @@ The API listens on `http://localhost:5124` with Swagger at `/swagger`.
 ```powershell
 cd frontend
 npm install
-copy .env.example .env.local   # optional; defaults work with the dev proxy
 npm run dev
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies `/api` to the backend. With no
-`VITE_AAD_CLIENT_ID` set, the app runs in dev mode (no login). Provide the `VITE_AAD_*` values to enable
-MSAL sign-in.
+Open `http://localhost:5173`. The Vite dev server proxies `/api` to the backend. Development uses the
+same tenant-restricted Entra login as production; the SPA app registration must include
+`http://localhost:5173` as a Single-page application redirect URI. The tenant is configured in
+`frontend/.env.development`.
 
 ---
 

@@ -167,6 +167,8 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 var azureAd = builder.Configuration.GetSection("AzureAd");
 var azureAdClientId = azureAd["ClientId"];
 var azureAdTenantId = azureAd["TenantId"];
+var useAzureAdInDevelopment = builder.Configuration.GetValue<bool>(
+    "Authentication:UseAzureAdInDevelopment");
 var sharedAuthority = azureAdTenantId is "common" or "organizations" or "consumers";
 if (!string.IsNullOrWhiteSpace(azureAdClientId)
     && (string.IsNullOrWhiteSpace(azureAdTenantId) || sharedAuthority)
@@ -185,7 +187,8 @@ if (provisioningEnabled
         "AzureAd:TenantId must match AzureProvisioning:TenantId when provisioning is enabled.");
 }
 
-var useAzureAd = !string.IsNullOrWhiteSpace(azureAdClientId)
+var useAzureAd = (!builder.Environment.IsDevelopment() || useAzureAdInDevelopment)
+    && !string.IsNullOrWhiteSpace(azureAdClientId)
     && !string.IsNullOrWhiteSpace(azureAdTenantId)
     && !sharedAuthority;
 if (useAzureAd)

@@ -81,6 +81,10 @@ public sealed class AgentRunner
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
             instructions = $"{instructions}\n\n{_skills.BuildCatalogPrompt()}";
 
+            var reachedFinalResponse = false;
+            var repairRequired = false;
+            string? previousFailureSignature = null;
+            var repeatedFailureCount = 0;
             for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -165,13 +169,63 @@ public sealed class AgentRunner
 
                 if (calls.Count == 0)
                 {
+                    if (repairRequired)
+                    {
+                        input.Add(ResponseItem.CreateUserMessageItem(
+                            AgentRunWorkflow.RepairContinuationPrompt));
+                        _logger.LogWarning(
+                            "Agent run {RunId} attempted to stop while a repairable build failure " +
+                            "was pending; continuing the tool loop.",
+                            runId);
+                        continue;
+                    }
+                    reachedFinalResponse = true;
                     break; // model produced a final answer with no tool use
                 }
 
                 foreach (var call in calls)
                 {
-                    await ExecuteToolAsync(call, threadId, userId, runId, seq++, input, Emit, ct);
+                    var result = await ExecuteToolAsync(
+                        call, threadId, userId, runId, seq++, input, Emit, ct);
+                    if (string.Equals(
+                            call.FunctionName, "build_test_project", StringComparison.Ordinal))
+                    {
+                        repairRequired = AgentRunWorkflow.RequiresCodeRepair(result);
+                        if (repairRequired)
+                        {
+                            var signature = AgentRunWorkflow.GetFailureSignature(result.Output);
+                            repeatedFailureCount = string.Equals(
+                                signature, previousFailureSignature, StringComparison.Ordinal)
+                                ? repeatedFailureCount + 1
+                                : 1;
+                            previousFailureSignature = signature;
+                            if (repeatedFailureCount >= 2)
+                            {
+                                repairRequired = false;
+                                _logger.LogWarning(
+                                    "Agent run {RunId} produced the same build failure signature " +
+                                    "twice; automatic repair will stop after the model reports evidence.",
+                                    runId);
+                            }
+                        }
+                        else
+                        {
+                            previousFailureSignature = null;
+                            repeatedFailureCount = 0;
+                        }
+                    }
                 }
+            }
+
+            if (!reachedFinalResponse)
+            {
+                _logger.LogWarning(
+                    "Agent run {RunId} reached the maximum of {MaxToolIterations} tool iterations.",
+                    runId,
+                    _options.MaxToolIterations);
+                throw new InvalidOperationException(
+                    $"Agent reached the maximum of {_options.MaxToolIterations} tool iterations " +
+                    "before producing a final response.");
             }
 
             run.Status = RunStatus.Completed;
@@ -201,7 +255,7 @@ public sealed class AgentRunner
         }
     }
 
-    private async Task ExecuteToolAsync(
+    private async Task<ToolResult> ExecuteToolAsync(
         FunctionCallResponseItem call, string threadId, string userId, string runId, long sequence,
         List<ResponseItem> input, Action<AgentEvent> emit, CancellationToken ct)
     {
@@ -256,6 +310,7 @@ public sealed class AgentRunner
         }
 
         input.Add(ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.Output));
+        return result;
     }
 
     private static JsonElement? TryParseArguments(BinaryData arguments)
@@ -287,5 +342,38 @@ public sealed class AgentRunner
         {
             _logger.LogError(ex, "Failed to persist terminal status for run {RunId}.", run.Id);
         }
+    }
+}
+
+internal static class AgentRunWorkflow
+{
+    public const string RepairContinuationPrompt = """
+        SERVER WORKFLOW: The latest build_test_project call returned a repairable build or test
+        failure with a BuildReport. Do not stop, summarize, ask the user to diagnose it, redraw the
+        architecture, or request another approval. Inspect the diagnostic and latest SourceZip,
+        update all implicated product and test files together, then call build_test_project again.
+        For compiler errors involving Program or a missing API namespace, inspect Program.cs and the
+        failing integration test together; reference the entry-point type exactly as declared and do
+        not infer a namespace from the project or assembly name. Top-level Program is commonly global.
+        Continue until the pipeline passes, the same failure repeats without progress, no safe repair
+        remains, or the server iteration budget is exhausted.
+        """;
+
+    public static bool RequiresCodeRepair(ToolResult result) =>
+        !result.Success
+        && result.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.BuildReport);
+
+    public static string GetFailureSignature(string output)
+    {
+        const string startMarker = "failureSignature:";
+        const string endMarker = "failedStageDiagnostic:";
+        var start = output.IndexOf(startMarker, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return output;
+        }
+        start += startMarker.Length;
+        var end = output.IndexOf(endMarker, start, StringComparison.Ordinal);
+        return (end < 0 ? output[start..] : output[start..end]).Trim();
     }
 }

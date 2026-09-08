@@ -18,8 +18,9 @@ public sealed class LoadSkillTool : IAgentTool
     public string Name => "load_skill";
 
     public string Description =>
-        "Load a server-side skill workflow into the current agent run. Use this before specialized " +
-        "skill tools whenever the user request matches an available skill.";
+        "Load a server-side skill workflow into the current agent run. This must be the first action " +
+        "for any request to create, modify, test, or deploy an application, website, frontend, " +
+        "backend, API, or software project; use skillName 'software-factory'.";
 
     public string ParametersSchema => """
     {

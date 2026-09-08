@@ -7,8 +7,9 @@ namespace MnaiWork.Api.Infrastructure;
 
 /// <summary>
 /// A development-only authentication handler that authenticates every request as a fixed local
-/// user. Enabled only when Azure AD is not configured, so <c>[Authorize]</c> works without tokens.
-/// The client may set <c>X-Debug-User</c> to simulate different users.
+/// user. Enabled by default in Development even when the Cosmos deployment profile contains Azure AD
+/// settings, so <c>[Authorize]</c> works without tokens. The client may set <c>X-Debug-User</c> to
+/// simulate different users.
 /// </summary>
 public sealed class DevAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {

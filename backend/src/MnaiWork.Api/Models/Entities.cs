@@ -154,10 +154,10 @@ public sealed class DeploymentProfile
     public int MaxConcurrentBuilds { get; set; } = 1;
 
     [JsonPropertyName("commandTimeoutMinutes")]
-    public int CommandTimeoutMinutes { get; set; } = 10;
+    public int CommandTimeoutMinutes { get; set; } = 15;
 
     [JsonPropertyName("totalTimeoutMinutes")]
-    public int TotalTimeoutMinutes { get; set; } = 30;
+    public int TotalTimeoutMinutes { get; set; } = 45;
 
     [JsonPropertyName("playwrightVersion")]
     public string PlaywrightVersion { get; set; } = "1.62.1";

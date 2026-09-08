@@ -13,9 +13,16 @@ export default function MessageList({ onExample }: { onExample: (text: string) =
   const messages = useChat((s) => s.messages);
   const toolActivity = useChat((s) => s.toolActivity);
   const endRef = useRef<HTMLDivElement>(null);
+  const latestSourceZipByName = new Map<string, string>();
+  for (const message of messages) {
+    for (const artifact of message.artifacts) {
+      if (artifact.kind === "sourceZip") latestSourceZipByName.set(artifact.fileName, artifact.id);
+    }
+  }
+  const latestSourceZipIds = new Set(latestSourceZipByName.values());
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages, toolActivity]);
 
   if (messages.length === 0) {
@@ -41,7 +48,7 @@ export default function MessageList({ onExample }: { onExample: (text: string) =
   return (
     <div className="messages">
       {messages.map((m) => (
-        <MessageItem key={m.id} message={m} />
+        <MessageItem key={m.id} message={m} latestSourceZipIds={latestSourceZipIds} />
       ))}
       {toolActivity && (
         <div className="row assistant">
