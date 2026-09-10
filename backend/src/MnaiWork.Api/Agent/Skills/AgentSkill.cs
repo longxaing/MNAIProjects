@@ -24,7 +24,7 @@ public sealed class SoftwareFactorySkill : IAgentSkill
         "Create, test, and deploy React plus ASP.NET Core demo projects using a mandatory " +
         "code, test, Azure what-if, approval, and deployment workflow.";
 
-    public string Version => "1.2.4";
+    public string Version => "1.2.7";
     public string Category => "engineering";
 
     public IReadOnlySet<string> ToolNames { get; } = new HashSet<string>(

@@ -72,6 +72,8 @@ public sealed class DeploymentProfileService
         {
             throw new ArgumentException("Resource group, location, and App Service Plan are required.");
         }
+        AzureProvisioningOptions.ValidatePlanSelection(
+            profile.SubscriptionId, profile.ExistingAppServicePlanResourceId, profile.AppServicePlanOs);
         if (profile.AzureTimeoutMinutes is < 1 or > 120
             || profile.CommandTimeoutMinutes is < 1 or > 30
             || profile.TotalTimeoutMinutes is < 1 or > 60

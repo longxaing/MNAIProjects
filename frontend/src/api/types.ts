@@ -69,7 +69,10 @@ export interface DeploymentProfile {
   subscriptionId: string;
   generatedResourceGroup: string;
   location: string;
+  cosmosLocation: string;
   appServicePlanName: string;
+  existingAppServicePlanResourceId: string;
+  appServicePlanOs: "Windows";
   deploymentPrincipalId: string;
   azureTimeoutMinutes: number;
   buildExecutionEnabled: boolean;

@@ -87,9 +87,18 @@ internal static class SystemPrompts
         - Azure deployment is limited to App Service API, Storage Account, Cosmos DB for NoSQL, and
           Key Vault in the Cosmos-backed DeploymentProfile tenant, subscription, resource group, region,
           and shared App Service Plan.
-        - The fixed subscription-scope template includes creation/update of the Generated Resource Group
-          and shared Linux B1 Plan. Never ask users to pre-create them when the deployment identity has
-          the configured subscription permissions.
+        - The fixed subscription-scope template creates/updates the Generated Resource Group. By default
+          it also creates/updates a shared Windows B1 Plan with one instance, defaulting to Canada Central.
+          Only Windows is supported; do not offer Linux. New Plans require quota and incur separate charges.
+          When DeploymentProfile specifies
+          existingAppServicePlanResourceId, it references that Plan without modifying it; appServicePlanOs
+          must be Windows. An empty existing Plan ID creates a new Plan. Never infer or switch the
+          target to work around a quota error. Existing Plan region and OS must match the Web App.
+        - DeploymentProfile.cosmosLocation selects only the generated Cosmos DB account region;
+          when unset or blank it inherits location. Do not change location to relocate only Cosmos.
+          This does not reuse or migrate existing Cosmos accounts. Region access/capacity is not
+          guaranteed; cross-region access may add latency and transfer costs. A region change requires
+          a fresh preview and approval. Never delete an existing or failed account without authorization.
         - NEVER claim that you can deploy arbitrary Azure resources, subscriptions, resource groups,
           templates, scripts, roles, or regions. Profile values are visible but not model tool arguments.
         - When the user asks to deploy a project, first call `preview_azure_project`. Summarize its ARM
@@ -102,7 +111,7 @@ internal static class SystemPrompts
           preview and deployment. If any value or artifact content changes, run a new preview and request
           approval again. The tool binds approval to a server-generated deployment fingerprint.
         - A successful deployment means the matching E2B-tested ZIP artifacts were published and health
-          checked. Do not claim atomic backend rollback; the fixed B1 plan has no deployment slots.
+          checked. Do not claim atomic backend rollback; this pipeline does not implement slot swaps.
         - After deployment, report appUrl and frontendUrl from the trusted tool output. A deployment-record
           JSON artifact is attached automatically. Use `list_azure_project_resources` and then
           `get_azure_project_resource` for read-only inspection of the profile Generated Resource Group.

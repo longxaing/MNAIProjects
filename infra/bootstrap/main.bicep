@@ -4,9 +4,9 @@ targetScope = 'subscription'
 param generatedResourceGroupName string = 'rg-mnaiwork-generated-demo'
 
 @description('Azure region for the resource group and shared App Service Plan.')
-param location string = 'eastus2'
+param location string = 'canadacentral'
 
-@description('Shared Linux App Service Plan name.')
+@description('Shared Windows App Service Plan name.')
 param appServicePlanName string = 'asp-mnaiwork-generated-demo'
 
 @description('Object/principal ID of the platform system-assigned managed identity.')

@@ -1,13 +1,13 @@
 @description('Azure region for the shared App Service Plan.')
 param location string
 
-@description('Shared Linux App Service Plan name.')
+@description('Shared Windows App Service Plan name.')
 param appServicePlanName string
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2024-11-01' = {
   name: appServicePlanName
   location: location
-  kind: 'linux'
+  kind: 'app'
   sku: {
     name: 'B1'
     tier: 'Basic'
@@ -15,7 +15,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2024-11-01' = {
     capacity: 1
   }
   properties: {
-    reserved: true
+    reserved: false
   }
 }
 

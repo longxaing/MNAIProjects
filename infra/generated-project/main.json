@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11587307158915688929"
+      "templateHash": "4948346144524530068"
     }
   },
   "parameters": {
@@ -24,11 +24,25 @@
         "description": "Azure region. Must match the pre-created App Service Plan region."
       }
     },
+    "cosmosLocation": {
+      "type": "string",
+      "defaultValue": "[parameters('location')]",
+      "metadata": {
+        "description": "Region for the new Cosmos DB account, independently of the Web App region."
+      }
+    },
     "appServicePlanName": {
       "type": "string",
       "defaultValue": "asp-mnaiwork-generated-demo",
       "metadata": {
-        "description": "Name of the pre-created shared Linux App Service Plan."
+        "description": "Name of the shared Windows App Service Plan."
+      }
+    },
+    "existingAppServicePlanResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Existing same-subscription Plan resource ID, possibly in another resource group."
       }
     },
     "deploymentPrincipalId": {
@@ -71,7 +85,8 @@
     "storageName": "[take(format('{0}{1}', variables('compactSlug'), variables('suffix')), 24)]",
     "keyVaultName": "[take(format('kv-{0}-{1}', parameters('projectSlug'), variables('suffix')), 24)]",
     "cosmosName": "[take(format('cosmos-{0}-{1}', parameters('projectSlug'), variables('suffix')), 44)]",
-    "appName": "[take(format('api-{0}-{1}', parameters('projectSlug'), variables('suffix')), 60)]"
+    "appName": "[take(format('api-{0}-{1}', parameters('projectSlug'), variables('suffix')), 60)]",
+    "appServicePlanId": "[if(empty(parameters('existingAppServicePlanResourceId')), resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName')), parameters('existingAppServicePlanResourceId'))]"
   },
   "resources": [
     {
@@ -134,7 +149,7 @@
       "type": "Microsoft.DocumentDB/databaseAccounts",
       "apiVersion": "2024-05-15",
       "name": "[variables('cosmosName')]",
-      "location": "[parameters('location')]",
+      "location": "[parameters('cosmosLocation')]",
       "kind": "GlobalDocumentDB",
       "properties": {
         "databaseAccountOfferType": "Standard",
@@ -145,7 +160,7 @@
         },
         "locations": [
           {
-            "locationName": "[parameters('location')]",
+            "locationName": "[parameters('cosmosLocation')]",
             "failoverPriority": 0,
             "isZoneRedundant": false
           }
@@ -204,7 +219,6 @@
         "enableRbacAuthorization": true,
         "enableSoftDelete": true,
         "softDeleteRetentionInDays": 7,
-        "enablePurgeProtection": false,
         "publicNetworkAccess": "Enabled"
       }
     },
@@ -213,15 +227,14 @@
       "apiVersion": "2024-11-01",
       "name": "[variables('appName')]",
       "location": "[parameters('location')]",
-      "kind": "app,linux",
+      "kind": "app",
       "identity": {
         "type": "SystemAssigned"
       },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "serverFarmId": "[variables('appServicePlanId')]",
         "httpsOnly": true,
         "siteConfig": {
-          "linuxFxVersion": "DOTNETCORE|8.0",
           "ftpsState": "Disabled",
           "minTlsVersion": "1.2",
           "alwaysOn": false,
@@ -262,6 +275,14 @@
             {
               "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
               "value": "false"
+            }
+          ],
+          "netFrameworkVersion": "v8.0",
+          "use32BitWorkerProcess": false,
+          "metadata": [
+            {
+              "name": "CURRENT_STACK",
+              "value": "dotnet"
             }
           ]
         }

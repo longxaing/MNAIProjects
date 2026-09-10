@@ -6,8 +6,14 @@ param projectSlug string
 @description('Azure region. Must match the pre-created App Service Plan region.')
 param location string = resourceGroup().location
 
-@description('Name of the pre-created shared Linux App Service Plan.')
+@description('Region for the new Cosmos DB account, independently of the Web App region.')
+param cosmosLocation string = location
+
+@description('Name of the shared Windows App Service Plan.')
 param appServicePlanName string = 'asp-mnaiwork-generated-demo'
+
+@description('Existing same-subscription Plan resource ID, possibly in another resource group.')
+param existingAppServicePlanResourceId string = ''
 
 @description('Object/principal ID of the platform deployment managed identity.')
 param deploymentPrincipalId string
@@ -31,9 +37,9 @@ var keyVaultName = take('kv-${projectSlug}-${suffix}', 24)
 var cosmosName = take('cosmos-${projectSlug}-${suffix}', 44)
 var appName = take('api-${projectSlug}-${suffix}', 60)
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2024-11-01' existing = {
-  name: appServicePlanName
-}
+var appServicePlanId = empty(existingAppServicePlanResourceId)
+  ? resourceId('Microsoft.Web/serverfarms', appServicePlanName)
+  : existingAppServicePlanResourceId
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageName
@@ -83,7 +89,7 @@ resource appDataContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
 
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: cosmosName
-  location: location
+  location: cosmosLocation
   kind: 'GlobalDocumentDB'
   properties: {
     databaseAccountOfferType: 'Standard'
@@ -94,7 +100,7 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     }
     locations: [
       {
-        locationName: location
+        locationName: cosmosLocation
         failoverPriority: 0
         isZoneRedundant: false
       }
@@ -146,7 +152,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
     publicNetworkAccess: 'Enabled'
   }
 }
@@ -154,15 +159,14 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 resource apiApp 'Microsoft.Web/sites@2024-11-01' = {
   name: appName
   location: location
-  kind: 'app,linux'
+  kind: 'app'
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
-    serverFarmId: appServicePlan.id
+    serverFarmId: appServicePlanId
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: 'DOTNETCORE|8.0'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       alwaysOn: false
@@ -203,6 +207,14 @@ resource apiApp 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
           value: 'false'
+        }
+      ]
+      netFrameworkVersion: 'v8.0'
+      use32BitWorkerProcess: false
+      metadata: [
+        {
+          name: 'CURRENT_STACK'
+          value: 'dotnet'
         }
       ]
     }

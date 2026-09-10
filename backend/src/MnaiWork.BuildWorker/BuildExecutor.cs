@@ -273,6 +273,7 @@ public sealed class LocalBuildPipeline
                     {
                         "publish", backendProject, "-c", "Release", "--no-restore",
                         "-p:AzureCosmosDisableNewtonsoftJsonCheck=false",
+                        "--self-contained", "false", "-p:UseAppHost=false", "-p:RuntimeIdentifier=",
                         "-o", backendOutput
                     }, root, totalTimeout.Token))
             {

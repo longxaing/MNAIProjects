@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "6468474817409336484"
+      "templateHash": "15907999662602939561"
     }
   },
   "parameters": {
@@ -18,7 +18,7 @@
     },
     "location": {
       "type": "string",
-      "defaultValue": "eastus2",
+      "defaultValue": "canadacentral",
       "metadata": {
         "description": "Azure region for the resource group and shared App Service Plan."
       }
@@ -27,7 +27,7 @@
       "type": "string",
       "defaultValue": "asp-mnaiwork-generated-demo",
       "metadata": {
-        "description": "Shared Linux App Service Plan name."
+        "description": "Shared Windows App Service Plan name."
       }
     },
     "deploymentPrincipalId": {
@@ -126,7 +126,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9201144152266264836"
+              "templateHash": "4858702611184636302"
             }
           },
           "parameters": {
@@ -139,7 +139,7 @@
             "appServicePlanName": {
               "type": "string",
               "metadata": {
-                "description": "Shared Linux App Service Plan name."
+                "description": "Shared Windows App Service Plan name."
               }
             },
             "deploymentPrincipalId": {
@@ -158,7 +158,7 @@
               "apiVersion": "2024-11-01",
               "name": "[parameters('appServicePlanName')]",
               "location": "[parameters('location')]",
-              "kind": "linux",
+              "kind": "app",
               "sku": {
                 "name": "B1",
                 "tier": "Basic",
@@ -166,7 +166,7 @@
                 "capacity": 1
               },
               "properties": {
-                "reserved": true
+                "reserved": false
               }
             },
             {

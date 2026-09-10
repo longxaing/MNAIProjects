@@ -1,7 +1,7 @@
 ---
 name: software-factory
 description: "Create, test, and deploy React plus ASP.NET Core demo projects. Use for requests to build application code, write unit/integration/E2E tests, provision the fixed Azure infrastructure, or publish a generated project."
-version: 1.2.4
+version: 1.2.7
 category: engineering
 author: MnaiWork
 ---
@@ -16,12 +16,58 @@ Use this skill whenever the user asks to create, modify, test, or deploy a softw
 - Backend: ASP.NET Core on .NET 8.
 - Tests: xUnit, WebApplicationFactory, and Playwright.
 - Azure services: only App Service API, Storage Account, Cosmos DB for NoSQL, and Key Vault.
-- The fixed subscription-scope orchestration template creates or updates the Generated Resource Group
-   and shared Linux B1 App Service Plan before deploying project resources into that group.
+- The fixed subscription-scope orchestration template creates or updates the Generated Resource Group.
+   By default it also creates/updates a shared Windows B1 App Service Plan with one instance in
+   Canada Central (`canadacentral`). Keep `existingAppServicePlanResourceId` empty to create a new Plan
+   in the generated resource group; a reference Plan's read-only properties are not template inputs.
+   If the DeploymentProfile has
+   `existingAppServicePlanResourceId`, it references that existing same-subscription Plan, possibly in
+   another resource group, without creating, resizing, moving, or otherwise modifying it.
+- Only Windows App Service Plans are supported. `appServicePlanOs` must be `Windows`.
+   Do not offer Linux as an alternative. New Windows B1 creation still requires regional subscription
+   quota and incurs separate Plan charges; an existing B1 Plan does not guarantee new capacity.
+   The server checks the existing Plan's operating system, region, and Ready/Succeeded state before
+   preview and deployment. The generated Web App location must match the Plan. Shared apps compete
+   for the same compute capacity; reusing a Plan does not guarantee quota or application capacity.
+- These settings are read from `get_deployment_profile`, not inferred from screenshots or supplied
+   as deployment tool arguments. An administrator must update the profile; never change the target
+   implicitly after a quota failure. Do not attempt to convert an existing Windows/Linux Plan or site
+   to the other operating system. Existing sites need an explicit migration design or a new project slug.
+- Publish portable .NET 8 framework-dependent backend packages with `UseAppHost=false` and no
+   `RuntimeIdentifier`. Preserve SDK-generated `web.config` launching the root application DLL via
+   `dotnet` for Windows IIS. Do not add Linux-only native dependencies or startup assumptions for a
+   Windows target. E2B tests run on Linux and do not prove Windows IIS compatibility; cloud verification
+   is still required. If Windows package validation rejects an old ZIP, rebuild with the updated runner,
+   inspect new screenshots, and request fresh `APPROVE UI`; never patch a previously approved package.
 - Azure tenant, subscription, resource group, region, and shared App Service Plan come from the
    Cosmos-backed DeploymentProfile and cannot be overridden by model tool arguments.
 
 Never claim support for arbitrary stacks, Azure resources, subscriptions, resource groups, roles, or templates.
+
+## Mandatory approval handoff in final replies
+
+Before ending a turn, check the latest tool results and make the pending workflow stage explicit.
+Use the user's language for explanations, but preserve approval phrases exactly, including spaces.
+
+- After a successful build and acceptable desktop/mobile screenshots, end with a dedicated next-step
+   section containing all three items: this tested revision has not been remotely deployed; ask the
+   user to inspect both screenshots and reply exactly `APPROVE UI`; explain that this approves only
+   the UI and starts an Azure resource-change preview, not a deployment. After preview, a separate
+   `DEPLOY <projectSlug>` confirmation will be required. Do not request DEPLOY at the build stage.
+- Suggested build-stage closing (translate the prose, not the approval phrase):
+   "Build and tests passed. This revision has not been remotely deployed. Please review the desktop
+   and mobile screenshots. To approve the UI and preview Azure deployment changes, reply exactly
+   `APPROVE UI`. Actual deployment requires a separate confirmation after the preview."
+- Never replace the approval request with a feature summary, extension suggestions, or a generic
+   invitation to keep iterating. Keep the feature summary brief and place the approval handoff last.
+   Before sending, verify that the final reply explicitly asks for `APPROVE UI`, not merely mentions it.
+   If the UI needs corrections, repair and rebuild instead of asking for approval of a deficient UI.
+- After a successful Azure preview, summarize the returned resource changes and end by requesting
+   the exact returned `DEPLOY <projectSlug>` phrase. Do not invent the slug or claim deployment occurred.
+   If preview fails, report the blocker instead of requesting deployment approval.
+- Claim remote deployment success and provide the returned access URL only after publication,
+   health checks, and cloud E2E succeed. Downloadable ZIPs and sandbox tests are not evidence of remote
+   deployment. For an existing deployment, distinguish the previous live version from this new revision.
 
 ## Mandatory workflow
 
@@ -248,21 +294,25 @@ Execute stages in order. Never report a later stage as complete unless its tool 
     - `preview_azure_project` is server-gated and fails unless the latest user message after the matching
        successful build with two screenshots is exactly `APPROVE UI`.
    - Call `preview_azure_project` only after `build_test_project` succeeds.
-    - The single subscription-scope ARM what-if must include the Generated Resource Group, shared Plan,
-       and project resources. Do not create foundation resources before user deployment approval.
+      - The single subscription-scope ARM what-if includes the Generated Resource Group and project
+         resources, plus Plan creation/update only when no existing Plan ID is configured. Explain which
+         Plan mode is selected and that an existing Plan remains unchanged. Do not create foundation
+         resources before user deployment approval.
    - Pass the `backendPackageFileId` and `frontendPackageFileId` returned by that successful build.
    - Summarize ARM what-if and ask the user to send the exact returned `DEPLOY <projectSlug>` phrase.
 8. **Infrastructure deployment**
    - Never deploy in the same user turn as preview.
    - Call `deploy_azure_project` only after the subsequent exact approval phrase.
-   - Formal deployment runs the same fixed orchestration template in Incremental mode: create/update
-     Generated RG, create/update the shared Plan, then create/update the approved project resources.
+    - Formal deployment runs the same fixed orchestration template in Incremental mode: create/update
+      Generated RG, create/update the shared Windows B1 Plan only in default mode, then create/update the
+       approved project resources. Existing Plan mode skips the foundation module entirely. A changed
+       Plan ID or operating system invalidates the deployment fingerprint and requires a new preview.
 9. **Code publication and cloud E2E**
    - Publish only the tested immutable artifacts.
    - Deployment replaces only the tested frontend package's runtime-config.js placeholder with the
      trusted ARM `appUrl`; never modify generated source or rebuild after infrastructure deployment.
    - Run health checks and cloud E2E before reporting success.
-    - Automatic rollback is not available on the fixed B1 App Service plan. On publication or health
+   - Automatic rollback is not implemented, including when an existing Plan supports slots. On publication or health
        verification failure, stop, report the failed stage, and preserve the previous deployment record
        and package artifacts for an explicitly approved recovery deployment.
 10. **Resource inspection**

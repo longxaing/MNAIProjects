@@ -9,8 +9,10 @@ The deployment path creates only these generated-project services:
 - Azure Key Vault
 
 The Agent uses a fixed subscription-scope orchestration template. Its ARM what-if and deployment
-cover the generated-project resource group, shared Linux B1 App Service Plan, and project resources
-in one operation. Users do not need to pre-create the group or plan.
+cover the generated-project resource group and project resources in one operation. By default they
+also create/update a shared Windows B1 App Service Plan with one instance, defaulting to Canada Central.
+Linux targets are not supported. Optional existing Plan mode references an administrator-configured
+Windows Plan without changing its SKU, capacity, or properties.
 
 Deployments are idempotent. Project resource names are deterministic for a resource group and project
 slug, and ARM Incremental mode creates missing resources or updates existing resources in place. ARM
@@ -51,7 +53,7 @@ Contributor access with the repository's custom four-service deployment role.
 ```powershell
 $subscriptionId = az account show --query id --output tsv
 $tenantId = az account show --query tenantId --output tsv
-$location = "eastus2"
+$location = "canadacentral"
 
 az deployment sub create `
   --name "mnai-generated-bootstrap" `
@@ -67,7 +69,7 @@ az deployment sub create `
 The optional bootstrap creates:
 
 - `rg-mnaiwork-generated-demo`
-- `asp-mnaiwork-generated-demo` (Linux B1)
+- `asp-mnaiwork-generated-demo` (Windows B1, one instance)
 - a custom deployment role limited to App Service, Storage, Cosmos DB, and Key Vault
 - constrained role-assignment permission for the approved Storage and Key Vault data roles
 
@@ -96,8 +98,11 @@ the `deploymentProfiles` container. Replace the four GUID placeholders with real
   "tenantId": "<tenant-guid>",
   "subscriptionId": "<subscription-guid>",
   "generatedResourceGroup": "rg-mnaiwork-generated-demo",
-  "location": "eastus2",
+  "location": "canadacentral",
+  "cosmosLocation": "",
   "appServicePlanName": "asp-mnaiwork-generated-demo",
+  "existingAppServicePlanResourceId": "",
+  "appServicePlanOs": "Windows",
   "deploymentPrincipalId": "<agent-sami-principal-guid>",
   "azureTimeoutMinutes": 30,
   "buildExecutionEnabled": true,
@@ -119,6 +124,102 @@ SAMI principal id, Azure timeout, build enabled state, concurrency/timeouts, Pla
 and Azure AD tenant. `get_deployment_profile` exposes the same item read-only to the Agent. A changed
 Azure AD tenant returns `restartRequired=true`; restart the Agent API so authentication is rebuilt.
 Cosmos/OpenAI/Storage credentials and other existing secrets remain in Key Vault and are unaffected.
+
+### Independent Cosmos DB region
+
+Exact `DEPLOY <projectSlug>` confirmations are executed by the server before any model response.
+The server uses arguments and success status persisted by the latest matching preview tool call,
+loads the software-factory tool gate, and invokes the deployment tool with its existing authorization,
+package, and fingerprint checks. The final reply is the actual tool output, not a model-generated
+success claim. Missing or failed preview evidence blocks deployment. Preview records created before
+this structured-evidence update require a fresh `APPROVE UI` preview and subsequent DEPLOY confirmation.
+
+Set `cosmosLocation` in the same `deploymentProfiles/default` item to choose the region for the
+generated project's new Cosmos DB account independently of the Web App and other resources:
+
+```json
+{
+  "location": "canadacentral",
+  "cosmosLocation": "westus2"
+}
+```
+
+Missing, null, empty, or whitespace-only `cosmosLocation` falls back to `location` for existing profiles.
+Keep `location` aligned with the existing App Service Plan. This setting does not reuse the platform's
+Cosmos account, relocate an existing account, or delete failed resources. An account left by a failed
+deployment may require separate recovery before retrying with a different region; do not delete it
+without confirming its data and dependencies. Region capacity/access is still validated by Azure.
+Cross-region database access can increase latency and incur data-transfer charges.
+
+Install an API version supporting this field first. The administrator PUT endpoint reloads the
+profile; direct Cosmos Data Explorer edits require saving the item and restarting the API.
+Changing the effective Cosmos region invalidates deployment approval: run a fresh preview and obtain
+a new DEPLOY confirmation. Recompile `infra/generated-project/main.bicep`,
+`infra/generated-deployment/main.bicep`, and `infra/generated-deployment/existing-plan.bicep` after
+template changes so both embedded deployment modes remain in sync.
+
+### Create a new Windows B1 Plan (default)
+
+The selected workflow creates a separate Windows B1 Plan with one instance, matching the reference
+Plan's SKU and OS without reusing or modifying `ASP-DefaultResourceGroupCAU-9847`. Set the existing
+profile fields below; code defaults do not replace values already stored in Cosmos:
+
+```json
+{
+  "location": "canadacentral",
+  "appServicePlanName": "asp-mnaiwork-generated-demo",
+  "appServicePlanOs": "Windows",
+  "existingAppServicePlanResourceId": ""
+}
+```
+
+Use a new Plan name if that name already identifies a Linux Plan in the generated resource group.
+Do not convert existing Plans in place. The new Plan needs regional Windows B1 quota and has its own
+compute charges; the reference Plan's available instances do not transfer to it. Quota failure must
+be resolved before deployment rather than bypassed by changing the OS or subscription.
+
+### Optional reuse of an existing Windows Plan
+
+Update the existing profile through the administrator-only PUT endpoint with its current ETag,
+preserving all other fields. If editing the Cosmos item directly, restart the API to load the change.
+Only when explicitly choosing reuse instead of new creation, use the following example:
+
+```json
+{
+  "location": "canadacentral",
+  "appServicePlanOs": "Windows",
+  "existingAppServicePlanResourceId": "/subscriptions/86819ba6-587e-44f1-86c1-027842da66e9/resourceGroups/DefaultResourceGroup-CAU/providers/Microsoft.Web/serverfarms/ASP-DefaultResourceGroupCAU-9847"
+}
+```
+
+The profile subscription must match the Plan subscription. Keep `generatedResourceGroup` as the
+dedicated generated-project group; do not point it at the Plan group merely to reuse a Plan.
+`appServicePlanName` is ignored for Plan selection when the existing resource ID is set. The resource
+group's metadata location need not match the Plan, but the Web App location must match it.
+
+The deployment identity needs read/join permission on the existing Plan as well as the existing
+deployment permissions on generated resources. The current subscription Contributor grant includes
+these Plan permissions. Both preview and deployment read the Plan and require its reported OS,
+location, and Ready/Succeeded state to match. Existing Plan mode selects the separate
+`generated-deployment/existing-plan.bicep` entry point. Its compiled template contains no foundation
+module or `Microsoft.Web/serverfarms` resource declaration, rather than relying on a conditional
+deployment of the foundation. It does not resize, convert, or move the Plan or modify applications
+already hosted on it. New apps
+share its CPU and memory. Capacity and quota acceptance still require Azure preview/validation.
+Do not use this mode to convert an existing Linux Web App into Windows in place.
+
+After changing this entry point or its shared project module, run
+`az bicep build --file infra/generated-deployment/existing-plan.bicep` before building the API.
+The API embeds the compiled JSON and binds the selected template to the approval fingerprint;
+installing this template-selection update requires a fresh preview and DEPLOY confirmation for reuse.
+
+Deploy the updated API and rebuild the E2B runner template before using this mode. The runner publishes
+portable .NET 8 framework-dependent ZIPs with no RID or apphost. Windows preview/deployment validates
+the IIS `web.config`, root DLL, and runtime metadata; incompatible old ZIPs must be rebuilt and receive
+fresh UI approval. E2B runs on Linux, so passing sandbox tests is not Windows IIS runtime verification.
+Publication uses the existing Kudu ZIP flow and checks cloud health/readiness and frontend fingerprints.
+Switching Plan ID or OS changes the approval fingerprint and requires a fresh ARM preview and DEPLOY
+confirmation. No remote profile or resource is changed by building this repository.
 
 Builds run in project-scoped E2B sandboxes with short-lived dependency-cache reuse; the Agent API host no longer needs the .NET SDK, Node.js,
 npm, or browser binaries. Store the E2B API key as `E2B--ApiKey` and template ID as
@@ -145,8 +246,9 @@ Preview the Azure infrastructure for project demo-one using Cosmos database app 
 ```
 
 The Agent calls `preview_azure_project`, summarizes the subscription-scope ARM what-if, and returns an
-exact approval phrase. The preview includes the Generated Resource Group, shared Plan, and all project
-resources; it does not create them before approval.
+exact approval phrase. The preview includes the Generated Resource Group and all project resources;
+it includes Plan creation/update only in default new Windows Plan mode. An existing Plan is only referenced.
+The preview does not create resources before approval.
 After reviewing the result, send that phrase as a new message with no additional text:
 
 ```text

@@ -48,16 +48,49 @@ public sealed class DeploymentProfileServiceTests
             initial);
         var updated = ValidProfile();
         updated.GeneratedResourceGroup = "rg-updated";
+        updated.CosmosLocation = "westus2";
         updated.AzureTimeoutMinutes = 45;
+        updated.AppServicePlanOs = "Windows";
+        updated.ExistingAppServicePlanResourceId = $"/subscriptions/{updated.SubscriptionId}/resourceGroups/rg-existing/providers/Microsoft.Web/serverfarms/existing-plan";
 
         var saved = await service.ReplaceAsync(
             updated, "etag-1", "user-1", CancellationToken.None);
 
         Assert.Equal("rg-updated", runtime.GeneratedResourceGroup);
+        Assert.Equal("westus2", runtime.CosmosLocation);
+        Assert.Equal(updated.Location, runtime.Location);
         Assert.Equal(45, runtime.TimeoutMinutes);
+        Assert.Equal("Windows", runtime.AppServicePlanOs);
+        Assert.Equal(updated.ExistingAppServicePlanResourceId, runtime.ExistingAppServicePlanResourceId);
         Assert.Equal("etag-2", saved.ETag);
         Assert.Equal(2, saved.Version);
         Assert.Equal("user-1", saved.UpdatedBy);
+    }
+
+    [Fact]
+    public void DefaultPlanSelection_CreatesWindowsPlanInCanadaCentral()
+    {
+        var options = new AzureProvisioningOptions();
+        var profile = new DeploymentProfile();
+        Assert.Equal("Windows", options.AppServicePlanOs);
+        Assert.Equal("Windows", profile.AppServicePlanOs);
+        Assert.Equal("canadacentral", options.Location);
+        Assert.Equal("canadacentral", profile.Location);
+        Assert.Empty(options.ExistingAppServicePlanResourceId);
+        Assert.Empty(profile.ExistingAppServicePlanResourceId);
+        Assert.Empty(profile.CosmosLocation);
+        Assert.Equal(options.Location, RuntimeAzureProvisioningOptions.Fixed(options).CosmosLocation);
+        DeploymentProfileService.Validate(ValidProfile());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void CosmosLocation_FallsBackToLocationWhenUnset(string? cosmosLocation)
+    {
+        var options = new AzureProvisioningOptions { Location = "eastus2", CosmosLocation = cosmosLocation! };
+        Assert.Equal("eastus2", RuntimeAzureProvisioningOptions.Fixed(options).CosmosLocation);
     }
 
     [Fact]
@@ -78,6 +111,20 @@ public sealed class DeploymentProfileServiceTests
         Assert.Contains("deploymentProfiles/default", error.Message, StringComparison.Ordinal);
         Assert.Contains("Cosmos Data Explorer", error.Message, StringComparison.Ordinal);
         Assert.Contains("No Key Vault", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Linux", "")]
+    [InlineData("Other", "")]
+    [InlineData("Windows", "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-existing/providers/Microsoft.Web/serverfarms/plan")]
+    [InlineData("Windows", "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-existing/providers/Microsoft.Web/sites/app")]
+    public void Validate_RejectsInvalidExistingPlan(string operatingSystem, string planId)
+    {
+        var profile = ValidProfile();
+        profile.AppServicePlanOs = operatingSystem;
+        profile.ExistingAppServicePlanResourceId = planId;
+
+        Assert.Throws<ArgumentException>(() => DeploymentProfileService.Validate(profile));
     }
 
     private static DeploymentProfile ValidProfile() => new()

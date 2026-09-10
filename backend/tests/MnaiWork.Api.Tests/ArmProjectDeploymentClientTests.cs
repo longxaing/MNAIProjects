@@ -18,6 +18,222 @@ public sealed class ArmProjectDeploymentClientTests
     private const string PrincipalId = "33333333-3333-3333-3333-333333333333";
     private const string ResourceGroup = "rg-generated";
 
+    [Theory]
+    [InlineData("generated-deployment")]
+    [InlineData("existing-plan")]
+    public void EmbeddedTemplate_DoesNotOverrideKeyVaultPurgeProtection(string templateName)
+    {
+        using var stream = typeof(ArmProjectDeploymentClient).Assembly.GetManifestResourceStream(
+            $"MnaiWork.Api.Deployment.Templates.{templateName}.json");
+        Assert.NotNull(stream);
+        using var template = JsonDocument.Parse(stream);
+        var project = Assert.Single(template.RootElement.GetProperty("resources").EnumerateArray(),
+            resource => resource.GetProperty("type").GetString() == "Microsoft.Resources/deployments"
+                && resource.GetProperty("name").GetString()!.Contains("generated-project-"));
+        var vault = Assert.Single(project.GetProperty("properties").GetProperty("template")
+            .GetProperty("resources").EnumerateArray(),
+            resource => resource.GetProperty("type").GetString() == "Microsoft.KeyVault/vaults");
+        Assert.False(vault.GetProperty("properties").TryGetProperty("enablePurgeProtection", out _));
+        Assert.True(vault.GetProperty("properties").GetProperty("enableSoftDelete").GetBoolean());
+    }
+
+    private static ArmProjectDeploymentClient CreateExistingPlanClient(HttpMessageHandler handler, string operatingSystem = "Windows")
+        => new(new HttpClient(handler), new StubCredential(PrincipalId),
+            RuntimeAzureProvisioningOptions.Fixed(new AzureProvisioningOptions
+            {
+                Enabled = true,
+                TenantId = TenantId,
+                SubscriptionId = SubscriptionId,
+                GeneratedResourceGroup = ResourceGroup,
+                Location = "canadacentral",
+                AppServicePlanOs = operatingSystem,
+                ExistingAppServicePlanResourceId = $"/subscriptions/{SubscriptionId}/resourceGroups/rg-existing/providers/Microsoft.Web/serverfarms/existing-plan",
+                DeploymentPrincipalId = PrincipalId
+            }));
+
+    [Theory]
+    [InlineData(false, "")]
+    [InlineData(false, "westus2")]
+    [InlineData(true, "")]
+    [InlineData(true, "westus2")]
+    public async Task WhatIfAsync_UsesIndependentCosmosRegion(bool reusePlan, string cosmosLocation)
+    {
+        var options = new AzureProvisioningOptions
+        {
+            Enabled = true,
+            TenantId = TenantId,
+            SubscriptionId = SubscriptionId,
+            GeneratedResourceGroup = ResourceGroup,
+            Location = "canadacentral",
+            CosmosLocation = cosmosLocation,
+            DeploymentPrincipalId = PrincipalId,
+            ExistingAppServicePlanResourceId = reusePlan
+                ? $"/subscriptions/{SubscriptionId}/resourceGroups/rg-existing/providers/Microsoft.Web/serverfarms/existing-plan"
+                : ""
+        };
+        var handler = new ScriptedHandler((request, _) => request.Method == HttpMethod.Get
+            ? JsonResponse(HttpStatusCode.OK,
+                """{"location":"Canada Central","properties":{"reserved":false,"status":"Ready","provisioningState":"Succeeded"}}""")
+            : JsonResponse(HttpStatusCode.OK, """{"changes":[]}"""));
+        var client = new ArmProjectDeploymentClient(new HttpClient(handler), new StubCredential(PrincipalId),
+            RuntimeAzureProvisioningOptions.Fixed(options));
+        var request = new AzureProjectDeploymentRequest { ProjectSlug = "demo-one" };
+        var result = await client.WhatIfAsync(request, "backend", "frontend");
+
+        using var body = JsonDocument.Parse(handler.Bodies.Last());
+        var properties = body.RootElement.GetProperty("properties");
+        var parameters = properties.GetProperty("parameters");
+        Assert.Equal("canadacentral", parameters.GetProperty("location").GetProperty("value").GetString());
+        Assert.Equal(cosmosLocation == "" ? "canadacentral" : cosmosLocation,
+            parameters.GetProperty("cosmosLocation").GetProperty("value").GetString());
+        var project = Assert.Single(properties.GetProperty("template").GetProperty("resources").EnumerateArray(),
+            resource => resource.GetProperty("type").GetString() == "Microsoft.Resources/deployments"
+                && resource.GetProperty("name").GetString()!.Contains("generated-project-"));
+        Assert.Equal("[parameters('cosmosLocation')]", project.GetProperty("properties")
+            .GetProperty("parameters").GetProperty("cosmosLocation").GetProperty("value").GetString());
+        var resources = project.GetProperty("properties").GetProperty("template").GetProperty("resources");
+        var cosmos = Assert.Single(resources.EnumerateArray(),
+            resource => resource.GetProperty("type").GetString() == "Microsoft.DocumentDB/databaseAccounts");
+        Assert.Equal("[parameters('cosmosLocation')]", cosmos.GetProperty("location").GetString());
+        Assert.Equal("[parameters('cosmosLocation')]", cosmos.GetProperty("properties")
+            .GetProperty("locations")[0].GetProperty("locationName").GetString());
+        foreach (var resource in resources.EnumerateArray().Where(resource =>
+            resource.GetProperty("type").GetString() != "Microsoft.DocumentDB/databaseAccounts"
+                && resource.TryGetProperty("location", out _)))
+        {
+            Assert.Equal("[parameters('location')]", resource.GetProperty("location").GetString());
+        }
+
+        options.CosmosLocation = "eastus2";
+        Assert.NotEqual(result.DeploymentFingerprint, client.GetDeploymentFingerprint(request, "backend", "frontend"));
+    }
+
+    [Fact]
+    public async Task WhatIfAsync_ValidatesAndReferencesExistingWindowsPlan()
+    {
+        var handler = new ScriptedHandler((request, call) => call switch
+        {
+            1 when request.Method == HttpMethod.Get => JsonResponse(HttpStatusCode.OK,
+                """{"location":"Canada Central","properties":{"reserved":false,"status":"Ready","provisioningState":"Succeeded"}}"""),
+            2 when request.Method == HttpMethod.Post => JsonResponse(HttpStatusCode.OK, """{"changes":[]}"""),
+            _ => throw new InvalidOperationException("Unexpected request")
+        });
+        var client = CreateExistingPlanClient(handler);
+        var request = new AzureProjectDeploymentRequest { ProjectSlug = "demo-one" };
+
+        var result = await client.WhatIfAsync(request, "backend", "frontend");
+
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains("/resourceGroups/rg-existing/providers/Microsoft.Web/serverfarms/existing-plan", handler.Requests[0].AbsoluteUri);
+        using var body = JsonDocument.Parse(handler.Bodies[1]);
+        var parameters = body.RootElement.GetProperty("properties").GetProperty("parameters");
+        Assert.False(parameters.TryGetProperty("appServicePlanOs", out _));
+        Assert.EndsWith("/existing-plan", parameters.GetProperty("existingAppServicePlanResourceId").GetProperty("value").GetString());
+        var template = body.RootElement.GetProperty("properties").GetProperty("template");
+        var modules = template.GetProperty("resources").EnumerateArray()
+            .Where(resource => resource.GetProperty("type").GetString() == "Microsoft.Resources/deployments").ToList();
+        var project = Assert.Single(modules);
+        Assert.DoesNotContain("generated-foundation", template.GetRawText());
+        Assert.DoesNotContain("\"Microsoft.Web/serverfarms\"", template.GetRawText());
+        Assert.Equal("[parameters('existingAppServicePlanResourceId')]",
+            template.GetProperty("outputs").GetProperty("appServicePlanId").GetProperty("value").GetString());
+        var projectTemplate = project.GetProperty("properties").GetProperty("template");
+        var projectResources = projectTemplate.GetProperty("resources").EnumerateArray().ToList();
+        Assert.DoesNotContain(projectResources, resource => resource.GetProperty("type").GetString() == "Microsoft.Web/serverfarms");
+        var app = Assert.Single(projectResources, resource => resource.GetProperty("type").GetString() == "Microsoft.Web/sites");
+        Assert.Equal("[variables('appServicePlanId')]", app.GetProperty("properties").GetProperty("serverFarmId").GetString());
+        Assert.Contains("parameters('existingAppServicePlanResourceId')", projectTemplate.GetProperty("variables").GetProperty("appServicePlanId").GetString());
+        Assert.Equal("app", app.GetProperty("kind").GetString());
+        var siteConfig = app.GetProperty("properties").GetProperty("siteConfig");
+        Assert.Equal("v8.0", siteConfig.GetProperty("netFrameworkVersion").GetString());
+        Assert.False(siteConfig.GetProperty("use32BitWorkerProcess").GetBoolean());
+        Assert.False(siteConfig.TryGetProperty("linuxFxVersion", out _));
+        Assert.NotEqual(result.DeploymentFingerprint,
+            CreateClient(new StubHandler("{}")).GetDeploymentFingerprint(request, "backend", "frontend"));
+    }
+
+    [Theory]
+    [InlineData("true", "Canada Central", "Ready", "Succeeded", "operating system")]
+    [InlineData("null", "Canada Central", "Ready", "Succeeded", "operating system")]
+    [InlineData("false", "East US", "Ready", "Succeeded", "region")]
+    [InlineData("false", "Canada Central", "Pending", "Succeeded", "Ready")]
+    [InlineData("false", "Canada Central", "Ready", "Failed", "Ready")]
+    public async Task WhatIfAsync_RejectsIncompatibleExistingPlanBeforePreview(
+        string reserved, string location, string status, string state, string errorText)
+    {
+        var handler = new StubHandler(JsonSerializer.Serialize(new
+        {
+            location,
+            properties = new
+            {
+                reserved = reserved == "null" ? (bool?)null : bool.Parse(reserved),
+                status,
+                provisioningState = state
+            }
+        }));
+        var client = CreateExistingPlanClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.WhatIfAsync(
+            new AzureProjectDeploymentRequest { ProjectSlug = "demo-one" }, "backend", "frontend"));
+
+        Assert.Contains(errorText, error.Message);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Theory]
+    [InlineData("Pending", 1, "Ready")]
+    [InlineData("Ready", 2, "stop-after-payload")]
+    public async Task DeployAsync_RechecksExistingPlanAndOmitsPlanCreation(
+        string planStatus, int expectedRequests, string expectedError)
+    {
+        var handler = new ScriptedHandler((request, call) =>
+        {
+            if (call == 1)
+            {
+                Assert.Equal(HttpMethod.Get, request.Method);
+                return JsonResponse(HttpStatusCode.OK, JsonSerializer.Serialize(new
+                {
+                    location = "Canada Central",
+                    properties = new { reserved = false, status = planStatus, provisioningState = "Succeeded" }
+                }));
+            }
+
+            Assert.Equal(2, call);
+            Assert.Equal(HttpMethod.Put, request.Method);
+            return JsonResponse(HttpStatusCode.BadRequest, """{"error":{"code":"stop-after-payload"}}""");
+        });
+        var client = CreateExistingPlanClient(handler);
+        var request = new AzureProjectDeploymentRequest { ProjectSlug = "demo-one" };
+        const string manifest = """{"buildId":"0123456789abcdef0123456789abcdef"}""";
+        var backend = CreateZip(
+            ("deployment-manifest.json", manifest),
+            ("web.config", "<configuration><system.webServer><aspNetCore processPath=\"dotnet\" arguments=\".\\App.dll\" /></system.webServer></configuration>"),
+            ("App.dll", "binary"),
+            ("App.deps.json", """{"runtimeTarget":{"name":".NETCoreApp,Version=v8.0"}}"""),
+            ("App.runtimeconfig.json", """{"runtimeOptions":{"tfm":"net8.0"}}"""));
+        var frontend = CreateZip(("index.html", "<html></html>"),
+            ("runtime-config.js", "window.__APP_CONFIG__ = {};"), ("build-manifest.json", manifest));
+        var fingerprint = client.GetDeploymentFingerprint(request,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(backend)).ToLowerInvariant(),
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(frontend)).ToLowerInvariant());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.DeployAsync(request, backend, frontend, fingerprint));
+
+        Assert.Contains(expectedError, error.Message);
+        Assert.Equal(expectedRequests, handler.RequestCount);
+        if (expectedRequests == 2)
+        {
+            using var body = JsonDocument.Parse(handler.Bodies[1]);
+            var properties = body.RootElement.GetProperty("properties");
+            Assert.EndsWith("/existing-plan", properties.GetProperty("parameters")
+                .GetProperty("existingAppServicePlanResourceId").GetProperty("value").GetString());
+            var template = properties.GetProperty("template");
+            Assert.DoesNotContain("generated-foundation", template.GetRawText());
+            Assert.DoesNotContain("\"Microsoft.Web/serverfarms\"", template.GetRawText());
+        }
+    }
+
     [Fact]
     public async Task GetGeneratedResourceAsync_RejectsResourceOutsideConfiguredGroup()
     {
@@ -29,6 +245,32 @@ public sealed class ArmProjectDeploymentClientTests
             "Microsoft.Storage/storageAccounts/example"));
 
         Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Theory]
+    [InlineData("dotnet", ".NETCoreApp,Version=v8.0/linux-x64", "portable")]
+    [InlineData("./App", ".NETCoreApp,Version=v8.0", "launch")]
+    public void ValidateWindowsBackendPackage_RejectsPlatformSpecificPackage(string processPath, string target, string errorText)
+    {
+        var package = CreateZip(
+            ("web.config", $"<configuration><system.webServer><aspNetCore processPath=\"{processPath}\" arguments=\".\\App.dll\" /></system.webServer></configuration>"),
+            ("App.dll", "binary"),
+            ("App.deps.json", JsonSerializer.Serialize(new { runtimeTarget = new { name = target } })),
+            ("App.runtimeconfig.json", """{"runtimeOptions":{"tfm":"net8.0"}}"""));
+
+        var error = Assert.Throws<InvalidDataException>(() => ArmProjectDeploymentClient.ValidateWindowsBackendPackage(package));
+
+        Assert.Contains(errorText, error.Message);
+        Assert.Contains("fresh APPROVE UI", error.Message);
+    }
+
+    [Fact]
+    public void ValidateWindowsBackendPackage_RejectsMissingIisConfiguration()
+    {
+        var error = Assert.Throws<InvalidDataException>(() =>
+            ArmProjectDeploymentClient.ValidateWindowsBackendPackage(CreateZip(("App.dll", "binary"))));
+
+        Assert.Contains("web.config", error.Message);
     }
 
     [Fact]
@@ -105,6 +347,14 @@ public sealed class ArmProjectDeploymentClientTests
                     .GetProperty("value")
                     .GetString());
             var resources = properties.GetProperty("template").GetProperty("resources");
+            Assert.Equal("", properties.GetProperty("parameters").GetProperty("existingAppServicePlanResourceId").GetProperty("value").GetString());
+            var foundation = Assert.Single(resources.EnumerateArray(), resource => resource.TryGetProperty("condition", out _));
+            var plan = Assert.Single(foundation.GetProperty("properties").GetProperty("template").GetProperty("resources").EnumerateArray());
+            Assert.Equal("Microsoft.Web/serverfarms", plan.GetProperty("type").GetString());
+            Assert.Equal("app", plan.GetProperty("kind").GetString());
+            Assert.False(plan.GetProperty("properties").GetProperty("reserved").GetBoolean());
+            Assert.Equal("B1", plan.GetProperty("sku").GetProperty("name").GetString());
+            Assert.Equal(1, plan.GetProperty("sku").GetProperty("capacity").GetInt32());
             Assert.Contains(resources.EnumerateArray(), resource =>
                 resource.GetProperty("type").GetString() == "Microsoft.Resources/resourceGroups");
             Assert.True(resources.EnumerateArray().Count(resource =>

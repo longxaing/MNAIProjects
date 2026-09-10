@@ -30,6 +30,8 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\..\infra\generated-deployment\main.json"
               Link="Deployment\Templates\generated-deployment.json" />
+    <EmbeddedResource Include="..\..\..\infra\generated-deployment\existing-plan.json"
+          Link="Deployment\Templates\existing-plan.json" />
     <EmbeddedResource Include="Agent\Skills\skill_packs\software-factory\SKILL.md">
       <LogicalName>MnaiWork.Api.Agent.Skills.skill_packs.software_factory.SKILL.md</LogicalName>
     </EmbeddedResource>

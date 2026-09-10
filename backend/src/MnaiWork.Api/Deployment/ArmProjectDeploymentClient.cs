@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Azure;
 using Azure.Core;
 using Azure.Storage.Blobs;
@@ -46,6 +47,8 @@ public sealed class ArmProjectDeploymentClient
     private const string PublicationContractVersion = "2";
     private const string TemplateResourceName =
         "MnaiWork.Api.Deployment.Templates.generated-deployment.json";
+    private const string ExistingPlanTemplateResourceName =
+        "MnaiWork.Api.Deployment.Templates.existing-plan.json";
 
     private static readonly Regex ProjectSlugPattern = new(
         "^[a-z0-9](?:[a-z0-9-]{1,22}[a-z0-9])?$",
@@ -61,6 +64,11 @@ public sealed class ArmProjectDeploymentClient
     private readonly RuntimeAzureProvisioningOptions _options;
     private readonly AzureProvisioningOperationGate _operationGate;
     private readonly string _templateJson;
+    private readonly string _existingPlanTemplateJson;
+
+    private string SelectedTemplateJson => string.IsNullOrWhiteSpace(_options.ExistingAppServicePlanResourceId)
+        ? _templateJson
+        : _existingPlanTemplateJson;
 
     public ArmProjectDeploymentClient(
         HttpClient http,
@@ -72,7 +80,8 @@ public sealed class ArmProjectDeploymentClient
         _credential = credential;
         _options = options;
         _operationGate = operationGate ?? new AzureProvisioningOperationGate();
-        _templateJson = LoadTemplate();
+        _templateJson = LoadTemplate(TemplateResourceName);
+        _existingPlanTemplateJson = LoadTemplate(ExistingPlanTemplateResourceName);
     }
 
     public bool Enabled => _options.Enabled;
@@ -170,12 +179,15 @@ public sealed class ArmProjectDeploymentClient
     {
         var canonical = string.Join('\n',
             PublicationContractVersion,
-            _templateJson,
+            SelectedTemplateJson,
             _options.TenantId,
             _options.SubscriptionId,
             _options.GeneratedResourceGroup,
             _options.Location,
+            _options.CosmosLocation,
             _options.AppServicePlanName,
+            _options.ExistingAppServicePlanResourceId,
+            _options.AppServicePlanOs,
             _options.DeploymentPrincipalId,
             request.ProjectSlug,
             request.CosmosDatabaseName,
@@ -195,6 +207,7 @@ public sealed class ArmProjectDeploymentClient
     {
         using var operation = await _operationGate.EnterAsync(ct);
         Validate(request);
+        await ValidateExistingPlanAsync(ct);
         var deploymentFingerprint = GetDeploymentFingerprint(
             request, backendPackageHash, frontendPackageHash);
         var deploymentName = CreateDeploymentName(request.ProjectSlug);
@@ -240,6 +253,7 @@ public sealed class ArmProjectDeploymentClient
             throw new InvalidOperationException(
                 "Deployment configuration or packages changed after ARM what-if approval.");
         }
+            ValidateBackendPackageForTarget(backendPackage);
         var gateKey = string.Join('/',
             _options.SubscriptionId,
             _options.GeneratedResourceGroup,
@@ -248,6 +262,7 @@ public sealed class ArmProjectDeploymentClient
         await gate.WaitAsync(ct);
         try
         {
+            await ValidateExistingPlanAsync(ct);
             return await DeployCoreAsync(
                 request,
                 backendPackage,
@@ -357,6 +372,108 @@ public sealed class ArmProjectDeploymentClient
         {
             throw new InvalidOperationException(
                 "AzureProvisioning configuration is incomplete or invalid.");
+        }
+        AzureProvisioningOptions.ValidatePlanSelection(
+            _options.SubscriptionId, _options.ExistingAppServicePlanResourceId, _options.AppServicePlanOs);
+    }
+
+    private async Task ValidateExistingPlanAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(_options.ExistingAppServicePlanResourceId))
+        {
+            return;
+        }
+        var uri = new Uri($"https://management.azure.com{_options.ExistingAppServicePlanResourceId}?api-version=2024-11-01");
+        using var response = await SendAsync(HttpMethod.Get, uri, null, ct);
+        var plan = await ReadSuccessJsonAsync(response, ct);
+        if (!plan.TryGetProperty("properties", out var properties)
+            || !properties.TryGetProperty("reserved", out var reserved)
+            || reserved.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new InvalidOperationException("Existing App Service Plan did not report its operating system (properties.reserved).");
+        }
+        if (reserved.GetBoolean())
+        {
+            throw new InvalidOperationException("Existing App Service Plan operating system does not match AppServicePlanOs. The plan will not be modified.");
+        }
+        var location = GetOptionalString(plan, "location")?.Replace(" ", string.Empty);
+        if (!string.Equals(location, _options.Location.Replace(" ", string.Empty), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Existing App Service Plan region does not match the deployment location. The plan will not be moved.");
+        }
+        if (!IsState(GetOptionalString(properties, "provisioningState"), "Succeeded")
+            || !IsState(GetOptionalString(properties, "status"), "Ready"))
+        {
+            throw new InvalidOperationException("Existing App Service Plan must be successfully provisioned and Ready before deployment.");
+        }
+    }
+
+    public void ValidateBackendPackageForTarget(byte[] package)
+    {
+        if (_options.AppServicePlanOs == "Windows")
+        {
+            ValidateWindowsBackendPackage(package);
+        }
+    }
+
+    internal static void ValidateWindowsBackendPackage(byte[] package)
+    {
+        const string repair = "Rebuild with the current E2B runner as a portable .NET 8 framework-dependent package " +
+            "(UseAppHost=false, no RuntimeIdentifier), then obtain fresh APPROVE UI and deployment preview. Do not modify approved ZIPs.";
+        using var stream = new MemoryStream(package, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var config = archive.GetEntry("web.config");
+        if (config is null)
+        {
+            throw new InvalidDataException("Windows App Service requires web.config at the package root. " + repair);
+        }
+        using var configStream = config.Open();
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(configStream);
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            throw new InvalidDataException("Invalid Windows web.config. " + repair, ex);
+        }
+        var aspNetCore = document.Descendants("aspNetCore").SingleOrDefault();
+        var assembly = aspNetCore?.Attribute("arguments")?.Value.Trim().Trim('"').Replace('\\', '/');
+        if (assembly?.StartsWith("./", StringComparison.Ordinal) == true)
+        {
+            assembly = assembly[2..];
+        }
+        if (!string.Equals(aspNetCore?.Attribute("processPath")?.Value, "dotnet", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(assembly) || assembly.Contains('/')
+            || !assembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || archive.GetEntry(assembly) is null)
+        {
+            throw new InvalidDataException("Windows web.config must launch a root application DLL using dotnet. " + repair);
+        }
+        var deps = archive.GetEntry(Path.ChangeExtension(assembly, ".deps.json"));
+        var runtime = archive.GetEntry(Path.ChangeExtension(assembly, ".runtimeconfig.json"));
+        if (deps is null || runtime is null)
+        {
+            throw new InvalidDataException("Windows package is missing runtime configuration or dependency metadata. " + repair);
+        }
+        try
+        {
+            using var depsStream = deps.Open();
+            using var depsDocument = JsonDocument.Parse(depsStream);
+            using var runtimeStream = runtime.Open();
+            using var runtimeDocument = JsonDocument.Parse(runtimeStream);
+            var target = depsDocument.RootElement.GetProperty("runtimeTarget").GetProperty("name").GetString();
+            var options = runtimeDocument.RootElement.GetProperty("runtimeOptions");
+            if (string.IsNullOrEmpty(target) || target.Contains('/')
+                || options.GetProperty("tfm").GetString() != "net8.0"
+                || options.TryGetProperty("includedFrameworks", out _))
+            {
+                throw new InvalidDataException("Windows package must be portable and framework-dependent on .NET 8. " + repair);
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new InvalidDataException("Invalid Windows package runtime metadata. " + repair, ex);
         }
     }
 
@@ -498,13 +615,15 @@ public sealed class ArmProjectDeploymentClient
         var properties = new JsonObject
         {
             ["mode"] = "Incremental",
-            ["template"] = JsonNode.Parse(_templateJson),
+            ["template"] = JsonNode.Parse(SelectedTemplateJson),
             ["parameters"] = new JsonObject
             {
                 ["generatedResourceGroupName"] = Parameter(_options.GeneratedResourceGroup),
                 ["projectSlug"] = Parameter(request.ProjectSlug),
                 ["location"] = Parameter(_options.Location),
+                ["cosmosLocation"] = Parameter(_options.CosmosLocation),
                 ["appServicePlanName"] = Parameter(_options.AppServicePlanName),
+                ["existingAppServicePlanResourceId"] = Parameter(_options.ExistingAppServicePlanResourceId),
                 ["deploymentPrincipalId"] = Parameter(_options.DeploymentPrincipalId),
                 ["cosmosDatabaseName"] = Parameter(request.CosmosDatabaseName),
                 ["cosmosContainerName"] = Parameter(request.CosmosContainerName),
@@ -642,6 +761,11 @@ public sealed class ArmProjectDeploymentClient
             "?api-version=2024-03-01");
         await EnsureResourceExistsAsync(resourceGroupUri, "generated resource group", ct);
 
+        if (!string.IsNullOrEmpty(_options.ExistingAppServicePlanResourceId))
+        {
+            await ValidateExistingPlanAsync(ct);
+            return;
+        }
         var planUri = new Uri(
             $"https://management.azure.com/subscriptions/{_options.SubscriptionId}" +
             $"/resourceGroups/{Uri.EscapeDataString(_options.GeneratedResourceGroup)}" +
@@ -1191,12 +1315,12 @@ public sealed class ArmProjectDeploymentClient
         return document.RootElement.Clone();
     }
 
-    private static string LoadTemplate()
+    private static string LoadTemplate(string resourceName)
     {
         using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream(TemplateResourceName)
+            .GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException(
-                $"Embedded ARM template '{TemplateResourceName}' was not found.");
+                $"Embedded ARM template '{resourceName}' was not found.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }

@@ -9,6 +9,53 @@ namespace MnaiWork.Api.Tests;
 
 public sealed class SoftwareFactoryApprovalTests
 {
+    [Theory]
+    [InlineData("DEPLOY demo-one", "demo-one")]
+    [InlineData(" DEPLOY demo-one ", "demo-one")]
+    [InlineData("deploy demo-one", null)]
+    [InlineData("DEPLOY demo-one please", null)]
+    [InlineData("APPROVE UI", null)]
+    public void DeploymentConfirmation_RequiresExactPhrase(string content, string? expected)
+    {
+        Assert.Equal(expected, AgentRunWorkflow.GetDeploymentApprovalSlug(
+            new[] { Message(MessageRole.User, 1, content) }));
+    }
+
+    [Theory]
+    [InlineData(true, "demo-one", true)]
+    [InlineData(false, "demo-one", false)]
+    [InlineData(null, "demo-one", false)]
+    [InlineData(true, "other-project", false)]
+    public void DeploymentConfirmation_RequiresPersistedSuccessfulMatchingPreview(
+        bool? succeeded, string slug, bool expected)
+    {
+        var preview = Message(MessageRole.Tool, 1, "preview output");
+        preview.ToolName = "preview_azure_project";
+        preview.ToolSucceeded = succeeded;
+        preview.ToolArguments = System.Text.Json.JsonSerializer.SerializeToElement(new { projectSlug = slug });
+        var history = new[] { preview, Message(MessageRole.User, 2, "DEPLOY demo-one") };
+        Assert.Equal(expected, AgentRunWorkflow.GetApprovedDeploymentArguments(history).HasValue);
+
+        preview.ToolArguments = null;
+        Assert.Null(AgentRunWorkflow.GetApprovedDeploymentArguments(history));
+        preview.Role = MessageRole.Assistant;
+        Assert.Null(AgentRunWorkflow.GetApprovedDeploymentArguments(history));
+    }
+
+    [Fact]
+    public void DeploymentConfirmation_DoesNotFallBackPastFailedPreview()
+    {
+        var success = Message(MessageRole.Tool, 1, "succeeded");
+        success.ToolName = "preview_azure_project";
+        success.ToolSucceeded = true;
+        success.ToolArguments = System.Text.Json.JsonSerializer.SerializeToElement(new { projectSlug = "demo-one" });
+        var failure = Message(MessageRole.Tool, 2, "failed");
+        failure.ToolName = "preview_azure_project";
+        failure.ToolSucceeded = false;
+        Assert.Null(AgentRunWorkflow.GetApprovedDeploymentArguments(
+            new[] { success, failure, Message(MessageRole.User, 3, "DEPLOY demo-one") }));
+    }
+
     [Fact]
     public void ProjectTemplate_IncludesNewtonsoftWithoutDisablingCosmosCheck()
     {
@@ -311,7 +358,7 @@ public sealed class SoftwareFactoryApprovalTests
         var skill = new SoftwareFactorySkill();
         var instructions = skill.LoadInstructions();
 
-        Assert.Equal("1.2.4", skill.Version);
+        Assert.Equal("1.2.7", skill.Version);
         Assert.Contains("explicit Newtonsoft.Json 13.0.4 PackageReference", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("do not follow that suggestion", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("Mandatory pre-build code review", instructions, StringComparison.Ordinal);
@@ -338,6 +385,41 @@ public sealed class SoftwareFactoryApprovalTests
         Assert.Contains("brackets and quotes are balanced", instructions, StringComparison.Ordinal);
         Assert.Contains("one `paths` call", instructions, StringComparison.Ordinal);
         Assert.Contains("same user, conversation, and project", instructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SoftwareFactorySkill_RequiresExplicitDeploymentApprovalHandoff()
+    {
+        var instructions = new SoftwareFactorySkill().LoadInstructions();
+
+        Assert.Contains("Mandatory approval handoff in final replies", instructions, StringComparison.Ordinal);
+        Assert.Contains("this tested revision has not been remotely deployed", instructions, StringComparison.Ordinal);
+        Assert.Contains("reply exactly `APPROVE UI`", instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not request DEPLOY at the build stage", instructions, StringComparison.Ordinal);
+        Assert.Contains("Never replace the approval request with a feature summary", instructions, StringComparison.Ordinal);
+        Assert.Contains("place the approval handoff last", instructions, StringComparison.Ordinal);
+        Assert.Contains("explicitly asks for `APPROVE UI`, not merely mentions it", instructions, StringComparison.Ordinal);
+        Assert.Contains("exact returned `DEPLOY <projectSlug>` phrase", instructions, StringComparison.Ordinal);
+        Assert.Contains("If preview fails, report the blocker", instructions, StringComparison.Ordinal);
+        Assert.Contains("health checks, and cloud E2E succeed", instructions, StringComparison.Ordinal);
+        Assert.Contains("distinguish the previous live version from this new revision", instructions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SoftwareFactorySkill_DescribesExistingWindowsPlanWithoutMutation()
+    {
+        var instructions = new SoftwareFactorySkill().LoadInstructions();
+
+        Assert.Contains("existingAppServicePlanResourceId", instructions);
+        Assert.Contains("Only Windows App Service Plans are supported", instructions);
+        Assert.Contains("empty to create a new Plan", instructions);
+        Assert.Contains("Canada Central", instructions);
+        Assert.Contains("one instance", instructions);
+        Assert.Contains("without creating, resizing, moving, or otherwise modifying it", instructions);
+        Assert.Contains("UseAppHost=false", instructions);
+        Assert.Contains("do not prove Windows IIS compatibility", instructions);
+        Assert.Contains("skips the foundation module entirely", instructions);
+        Assert.Contains("existingAppServicePlanResourceId", SystemPrompts.Agent);
     }
 
     [Fact]

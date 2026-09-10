@@ -65,6 +65,7 @@ public sealed class PreviewAzureProjectTool : IAgentTool
 
         try
         {
+            _deployments.ValidateBackendPackageForTarget(packages.Backend);
             var result = await _deployments.WhatIfAsync(
                 request, packages.BackendHash, packages.FrontendHash, ct);
             var json = JsonSerializer.Serialize(result.Changes, JsonDefaults.Options);
@@ -82,7 +83,7 @@ public sealed class PreviewAzureProjectTool : IAgentTool
                 "No resources were deployed. Review this result with the user:\n" + json +
                 $"\nTo approve deployment, the user must send exactly: {approvalPhrase}");
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException or TimeoutException)
         {
             _logger.LogError(ex, "Azure what-if failed for project {ProjectSlug}.", request.ProjectSlug);
             return ToolResult.Fail($"Azure what-if failed: {ex.Message}");

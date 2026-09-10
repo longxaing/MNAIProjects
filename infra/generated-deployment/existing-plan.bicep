@@ -1,36 +1,19 @@
 targetScope = 'subscription'
 
-@description('Resource group used only for generated projects.')
 param generatedResourceGroupName string
-
-@description('Azure region for the resource group and generated resources other than an explicitly relocated Cosmos account.')
 param location string = 'canadacentral'
-
-@description('Region for the new Cosmos DB account. Defaults to the deployment region.')
 param cosmosLocation string = location
-
-@description('Shared Windows App Service Plan name.')
 param appServicePlanName string
 
-@description('Existing same-subscription Plan resource ID. When supplied, never create or update the Plan.')
-param existingAppServicePlanResourceId string = ''
+@description('Existing Windows Plan resource ID. This template never creates or updates a Plan.')
+@minLength(1)
+param existingAppServicePlanResourceId string
 
-@description('Object/principal ID of the platform deployment managed identity.')
 param deploymentPrincipalId string
-
-@description('Lowercase project slug: letters, numbers, and hyphens only.')
 param projectSlug string
-
-@description('Cosmos DB database name.')
 param cosmosDatabaseName string
-
-@description('Cosmos DB container name.')
 param cosmosContainerName string
-
-@description('Anonymous backend health endpoint used after publication.')
 param healthCheckPath string
-
-@description('Server-generated fingerprint binding approved packages and deployment settings.')
 param deploymentFingerprint string
 
 resource generatedResourceGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -39,15 +22,6 @@ resource generatedResourceGroup 'Microsoft.Resources/resourceGroups@2024-03-01' 
 }
 
 var deploymentSuffix = take(uniqueString(deployment().name), 8)
-
-module foundation './foundation.bicep' = if (empty(existingAppServicePlanResourceId)) {
-  name: 'generated-foundation-${deploymentSuffix}'
-  scope: generatedResourceGroup
-  params: {
-    location: location
-    appServicePlanName: appServicePlanName
-  }
-}
 
 module project '../generated-project/main.bicep' = {
   name: 'generated-project-${projectSlug}-${deploymentSuffix}'
@@ -64,13 +38,10 @@ module project '../generated-project/main.bicep' = {
     healthCheckPath: healthCheckPath
     deploymentFingerprint: deploymentFingerprint
   }
-  dependsOn: [
-    foundation
-  ]
 }
 
 output generatedResourceGroupId string = generatedResourceGroup.id
-output appServicePlanId string = empty(existingAppServicePlanResourceId) ? foundation!.outputs.appServicePlanId : existingAppServicePlanResourceId
+output appServicePlanId string = existingAppServicePlanResourceId
 output appName string = project.outputs.appName
 output appUrl string = project.outputs.appUrl
 output appPrincipalId string = project.outputs.appPrincipalId

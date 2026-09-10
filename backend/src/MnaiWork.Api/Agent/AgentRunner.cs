@@ -73,6 +73,45 @@ public sealed class AgentRunner
             var history = await _messages.ListAsync(threadId, ct);
             long seq = (history.Count > 0 ? history.Max(m => m.Sequence) : 0) + 1;
 
+            if (AgentRunWorkflow.GetDeploymentApprovalSlug(history) is not null)
+            {
+                var arguments = AgentRunWorkflow.GetApprovedDeploymentArguments(history);
+                ToolResult deploymentResult;
+                if (arguments is null)
+                {
+                    deploymentResult = ToolResult.Fail(
+                        "Deployment was not started. No matching successful preview with persisted arguments " +
+                        "was found. Send APPROVE UI to obtain a fresh preview, then confirm its exact DEPLOY phrase.");
+                }
+                else if (!_skills.TryLoad(runId, "software-factory", out _))
+                {
+                    deploymentResult = ToolResult.Fail("Deployment was not started: software-factory skill is unavailable.");
+                }
+                else
+                {
+                    deploymentResult = await ExecuteToolCoreAsync(
+                        "deploy_azure_project", arguments, threadId, userId, runId, seq++, Emit, ct);
+                }
+
+                var reply = new ChatMessage
+                {
+                    ThreadId = threadId,
+                    RunId = runId,
+                    Role = MessageRole.Assistant,
+                    Sequence = seq++,
+                    Content = deploymentResult.Output,
+                    Streaming = false
+                };
+                await _messages.AddAsync(reply, ct);
+                Emit(new AgentEvent { Type = "message", MessageId = reply.Id, Role = "assistant" });
+                Emit(new AgentEvent { Type = "message_done", MessageId = reply.Id, Content = reply.Content });
+                run.Status = deploymentResult.Success ? RunStatus.Completed : RunStatus.Failed;
+                run.Error = deploymentResult.Success ? null : deploymentResult.Output;
+                await _runs.UpsertAsync(run, ct);
+                Emit(new AgentEvent { Type = "run", Status = deploymentResult.Success ? "completed" : "failed", Error = run.Error });
+                return;
+            }
+
             // Keep the prompt bounded: recent turns verbatim, older turns summarized.
             var prepared = await _context.PrepareAsync(history, ct);
             var input = prepared.Items;
@@ -269,26 +308,35 @@ public sealed class AgentRunner
         FunctionCallResponseItem call, string threadId, string userId, string runId, long sequence,
         List<ResponseItem> input, Action<AgentEvent> emit, CancellationToken ct)
     {
-        emit(new AgentEvent { Type = "tool", Tool = call.FunctionName, ToolStatus = "started" });
+        var result = await ExecuteToolCoreAsync(call.FunctionName, TryParseArguments(call.FunctionArguments),
+            threadId, userId, runId, sequence, emit, ct);
+        input.Add(ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.Output));
+        return result;
+    }
+
+    private async Task<ToolResult> ExecuteToolCoreAsync(
+        string toolName, JsonElement? args, string threadId, string userId, string runId, long sequence,
+        Action<AgentEvent> emit, CancellationToken ct)
+    {
+        emit(new AgentEvent { Type = "tool", Tool = toolName, ToolStatus = "started" });
 
         ToolResult result;
-        JsonElement? args = TryParseArguments(call.FunctionArguments);
         if (args is null)
         {
-            result = ToolResult.Fail($"Could not parse arguments for tool '{call.FunctionName}'.");
+            result = ToolResult.Fail($"Could not parse arguments for tool '{toolName}'.");
         }
-        else if (!_skills.IsToolAvailable(runId, call.FunctionName))
+        else if (!_skills.IsToolAvailable(runId, toolName))
         {
             result = ToolResult.Fail(
-                $"Tool '{call.FunctionName}' is unavailable until its server-side skill is loaded.");
+                $"Tool '{toolName}' is unavailable until its server-side skill is loaded.");
         }
-        else if (_tools.TryGet(call.FunctionName, out var tool))
+        else if (_tools.TryGet(toolName, out var tool))
         {
             result = await tool.ExecuteAsync(args.Value, new ToolContext(threadId, userId, runId), ct);
         }
         else
         {
-            result = ToolResult.Fail($"Unknown tool '{call.FunctionName}'.");
+            result = ToolResult.Fail($"Unknown tool '{toolName}'.");
         }
 
         var toolMessage = new ChatMessage
@@ -296,7 +344,9 @@ public sealed class AgentRunner
             ThreadId = threadId,
             RunId = runId,
             Role = MessageRole.Tool,
-            ToolName = call.FunctionName,
+            ToolName = toolName,
+            ToolArguments = toolName is "preview_azure_project" or "deploy_azure_project" ? args?.Clone() : null,
+            ToolSucceeded = result.Success,
             Content = result.Output,
             Sequence = sequence
         };
@@ -310,7 +360,7 @@ public sealed class AgentRunner
         {
             Type = "tool",
             MessageId = toolMessage.Id,
-            Tool = call.FunctionName,
+            Tool = toolName,
             ToolStatus = result.Success ? "completed" : "failed",
             Summary = result.Output
         });
@@ -319,7 +369,6 @@ public sealed class AgentRunner
             emit(new AgentEvent { Type = "artifact", MessageId = toolMessage.Id, Artifact = artifact });
         }
 
-        input.Add(ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.Output));
         return result;
     }
 
@@ -357,6 +406,35 @@ public sealed class AgentRunner
 
 internal static class AgentRunWorkflow
 {
+    public static string? GetDeploymentApprovalSlug(IReadOnlyList<ChatMessage> history)
+    {
+        var content = history.LastOrDefault(message => message.Role == MessageRole.User)?.Content.Trim();
+        const string prefix = "DEPLOY ";
+        return content is not null && content.StartsWith(prefix, StringComparison.Ordinal)
+            && CreateProjectWorkspaceTool.IsValidSlug(content[prefix.Length..])
+                ? content[prefix.Length..]
+                : null;
+    }
+
+    public static JsonElement? GetApprovedDeploymentArguments(IReadOnlyList<ChatMessage> history)
+    {
+        var slug = GetDeploymentApprovalSlug(history);
+        var latestUser = history.LastOrDefault(message => message.Role == MessageRole.User);
+        if (slug is null || latestUser is null)
+        {
+            return null;
+        }
+        var preview = history.LastOrDefault(message => message.Role == MessageRole.Tool
+            && message.ToolName == "preview_azure_project" && message.Sequence < latestUser.Sequence);
+        if (preview?.ToolSucceeded != true || preview.ToolArguments is not { ValueKind: JsonValueKind.Object } arguments
+            || !arguments.TryGetProperty("projectSlug", out var projectSlug)
+            || projectSlug.ValueKind != JsonValueKind.String || projectSlug.GetString() != slug)
+        {
+            return null;
+        }
+        return arguments.Clone();
+    }
+
     public const string RepairContinuationPrompt = """
         SERVER WORKFLOW: The latest build_test_project call returned a repairable build or test
         failure with a BuildReport. Do not stop, summarize, ask the user to diagnose it, redraw the

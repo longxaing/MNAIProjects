@@ -136,10 +136,19 @@ public sealed class DeploymentProfile
     public string GeneratedResourceGroup { get; set; } = "rg-mnaiwork-generated-demo";
 
     [JsonPropertyName("location")]
-    public string Location { get; set; } = "eastus2";
+    public string Location { get; set; } = "canadacentral";
+
+    [JsonPropertyName("cosmosLocation")]
+    public string CosmosLocation { get; set; } = string.Empty;
 
     [JsonPropertyName("appServicePlanName")]
     public string AppServicePlanName { get; set; } = "asp-mnaiwork-generated-demo";
+
+    [JsonPropertyName("existingAppServicePlanResourceId")]
+    public string ExistingAppServicePlanResourceId { get; set; } = string.Empty;
+
+    [JsonPropertyName("appServicePlanOs")]
+    public string AppServicePlanOs { get; set; } = "Windows";
 
     [JsonPropertyName("deploymentPrincipalId")]
     public string DeploymentPrincipalId { get; set; } = string.Empty;
@@ -185,7 +194,10 @@ public sealed class DeploymentProfile
             ["AzureProvisioning:SubscriptionId"] = SubscriptionId,
             ["AzureProvisioning:GeneratedResourceGroup"] = GeneratedResourceGroup,
             ["AzureProvisioning:Location"] = Location,
+            ["AzureProvisioning:CosmosLocation"] = CosmosLocation,
             ["AzureProvisioning:AppServicePlanName"] = AppServicePlanName,
+            ["AzureProvisioning:ExistingAppServicePlanResourceId"] = ExistingAppServicePlanResourceId,
+            ["AzureProvisioning:AppServicePlanOs"] = AppServicePlanOs,
             ["AzureProvisioning:DeploymentPrincipalId"] = DeploymentPrincipalId,
             ["AzureProvisioning:TimeoutMinutes"] = AzureTimeoutMinutes.ToString(),
             ["BuildExecution:Enabled"] = BuildExecutionEnabled.ToString(),
@@ -259,6 +271,12 @@ public sealed class ChatMessage
     /// <summary>Tool name when <see cref="Role"/> is Tool.</summary>
     [JsonPropertyName("toolName")]
     public string? ToolName { get; set; }
+
+    [JsonPropertyName("toolArguments")]
+    public System.Text.Json.JsonElement? ToolArguments { get; set; }
+
+    [JsonPropertyName("toolSucceeded")]
+    public bool? ToolSucceeded { get; set; }
 
     /// <summary>Monotonic ordering key within a thread.</summary>
     [JsonPropertyName("sequence")]

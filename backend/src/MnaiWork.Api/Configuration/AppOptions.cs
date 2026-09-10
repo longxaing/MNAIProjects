@@ -83,10 +83,38 @@ public sealed class AzureProvisioningOptions
     public string TenantId { get; set; } = string.Empty;
     public string SubscriptionId { get; set; } = string.Empty;
     public string GeneratedResourceGroup { get; set; } = "rg-mnaiwork-generated-demo";
-    public string Location { get; set; } = "eastus2";
+    public string Location { get; set; } = "canadacentral";
+    public string CosmosLocation { get; set; } = string.Empty;
     public string AppServicePlanName { get; set; } = "asp-mnaiwork-generated-demo";
+    public string ExistingAppServicePlanResourceId { get; set; } = string.Empty;
+    public string AppServicePlanOs { get; set; } = "Windows";
     public string DeploymentPrincipalId { get; set; } = string.Empty;
     public int TimeoutMinutes { get; set; } = 30;
+
+    public static void ValidatePlanSelection(string subscriptionId, string existingPlanId, string operatingSystem)
+    {
+        if (operatingSystem != "Windows")
+        {
+            throw new ArgumentException("Only Windows App Service Plans are supported. Set AppServicePlanOs to Windows in DeploymentProfile.");
+        }
+        if (string.IsNullOrEmpty(existingPlanId))
+        {
+            return;
+        }
+        var parts = existingPlanId.Split('/');
+        if (parts.Length != 9 || parts[0] != string.Empty
+            || !string.Equals(parts[1], "subscriptions", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[2], subscriptionId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[3], "resourceGroups", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[5], "providers", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[6], "Microsoft.Web", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[7], "serverfarms", StringComparison.OrdinalIgnoreCase)
+            || !System.Text.RegularExpressions.Regex.IsMatch(parts[4], @"^[\w.()-]+$")
+            || !System.Text.RegularExpressions.Regex.IsMatch(parts[8], @"^[a-zA-Z0-9-]+$"))
+        {
+            throw new ArgumentException("Existing App Service Plan must be a serverfarms resource ID in the configured subscription.");
+        }
+    }
 }
 
 /// <summary>Reads the latest Azure provisioning options after DeploymentProfile reloads.</summary>
@@ -112,7 +140,12 @@ public sealed class RuntimeAzureProvisioningOptions
     public string SubscriptionId => Current.SubscriptionId;
     public string GeneratedResourceGroup => Current.GeneratedResourceGroup;
     public string Location => Current.Location;
+    public string CosmosLocation => string.IsNullOrWhiteSpace(Current.CosmosLocation)
+        ? Current.Location
+        : Current.CosmosLocation.Trim();
     public string AppServicePlanName => Current.AppServicePlanName;
+    public string ExistingAppServicePlanResourceId => Current.ExistingAppServicePlanResourceId;
+    public string AppServicePlanOs => Current.AppServicePlanOs;
     public string DeploymentPrincipalId => Current.DeploymentPrincipalId;
     public int TimeoutMinutes => Current.TimeoutMinutes;
 }

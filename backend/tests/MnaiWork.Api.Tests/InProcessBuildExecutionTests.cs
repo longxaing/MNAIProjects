@@ -53,6 +53,8 @@ public sealed class InProcessBuildExecutionTests
         Assert.Equal("frontend tests", result.Steps[1].Name);
         Assert.All(result.Steps, step => Assert.True(step.Succeeded, step.Output));
         Assert.NotEmpty(Convert.FromBase64String(result.BackendPackageBase64!));
+        MnaiWork.Api.Deployment.ArmProjectDeploymentClient.ValidateWindowsBackendPackage(
+            Convert.FromBase64String(result.BackendPackageBase64!));
         Assert.NotEmpty(Convert.FromBase64String(result.FrontendPackageBase64!));
         Assert.True(Convert.FromBase64String(result.DesktopScreenshotBase64!).Length > 1_000);
         Assert.True(Convert.FromBase64String(result.MobileScreenshotBase64!).Length > 1_000);
