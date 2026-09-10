@@ -39,6 +39,67 @@ public sealed class E2BBuildExecutionTests
     }
 
     [Fact]
+    public async Task BuildExecutor_ReusesSandboxForSameIsolatedProjectScope()
+    {
+        var client = new FakeSandboxClient(SuccessfulResponse());
+        await using var executor = new BuildExecutor(
+            BuildConfiguration(),
+            client,
+            NullLogger<BuildExecutor>.Instance);
+
+        await executor.ExecuteAsync(
+            new byte[] { 1 },
+            "GeneratedApp.sln",
+            "src/backend/GeneratedApp.Api.csproj",
+            "src/frontend",
+            CancellationToken.None,
+            "user:thread:project");
+        await executor.ExecuteAsync(
+            new byte[] { 2 },
+            "GeneratedApp.sln",
+            "src/backend/GeneratedApp.Api.csproj",
+            "src/frontend",
+            CancellationToken.None,
+            "user:thread:project");
+
+        Assert.Equal(1, client.CreateCount);
+        Assert.Equal(TimeSpan.FromMinutes(17), client.Timeout);
+        Assert.Equal(2, client.Session.BuildCount);
+        Assert.False(client.Session.Disposed);
+    }
+
+    [Fact]
+    public async Task BuildExecutor_PrioritizesPreviousFailureWithoutSharingAcrossProjects()
+    {
+        var failed = new BuildProjectResponse(
+            false,
+            "frontend tests failed",
+            new[] { new BuildStepResult("frontend tests", false, 1, 10, "failed") },
+            null,
+            null);
+        var client = new FakeSandboxClient(failed);
+        await using var executor = new BuildExecutor(
+            BuildConfiguration(),
+            client,
+            NullLogger<BuildExecutor>.Instance);
+
+        await executor.ExecuteAsync(
+            new byte[] { 1 }, "app.sln", "api.csproj", "frontend",
+            CancellationToken.None, "user:thread:project-one");
+        client.Session.Response = SuccessfulResponse();
+        await executor.ExecuteAsync(
+            new byte[] { 2 }, "app.sln", "api.csproj", "frontend",
+            CancellationToken.None, "user:thread:project-one");
+        await executor.ExecuteAsync(
+            new byte[] { 3 }, "app.sln", "api.csproj", "frontend",
+            CancellationToken.None, "user:thread:project-two");
+
+        Assert.Equal("frontend tests", client.Session.Requests[1].PreferredFirstStage);
+        Assert.Equal(2, client.CreateCount);
+        Assert.Equal(2, client.Sessions.Count);
+    }
+
+    [Fact]
     public async Task BuildExecutor_RequiresTemplateIdFromKeyVaultConfiguration()
     {
         var configuration = new ConfigurationBuilder()
@@ -164,36 +225,46 @@ public sealed class E2BBuildExecutionTests
 
     private sealed class FakeSandboxClient : IE2BSandboxClient
     {
-        public FakeSandboxClient(BuildProjectResponse response) => Session = new FakeSession(response);
+        private readonly BuildProjectResponse _response;
+
+        public FakeSandboxClient(BuildProjectResponse response) => _response = response;
 
         public string? TemplateId { get; private set; }
         public TimeSpan Timeout { get; private set; }
-        public FakeSession Session { get; }
+        public int CreateCount { get; private set; }
+        public List<FakeSession> Sessions { get; } = new();
+        public FakeSession Session => Sessions[0];
 
         public Task<IE2BSandboxSession> CreateAsync(
             string templateId,
             TimeSpan timeout,
             CancellationToken ct)
         {
+            CreateCount++;
             TemplateId = templateId;
             Timeout = timeout;
-            return Task.FromResult<IE2BSandboxSession>(Session);
+            var session = new FakeSession(_response);
+            Sessions.Add(session);
+            return Task.FromResult<IE2BSandboxSession>(session);
         }
     }
 
     private sealed class FakeSession : IE2BSandboxSession
     {
-        private readonly BuildProjectResponse _response;
-
-        public FakeSession(BuildProjectResponse response) => _response = response;
+        public FakeSession(BuildProjectResponse response) => Response = response;
 
         public BuildProjectRequest? Request { get; private set; }
+        public List<BuildProjectRequest> Requests { get; } = new();
+        public int BuildCount { get; private set; }
         public bool Disposed { get; private set; }
+        public BuildProjectResponse Response { get; set; }
 
         public Task<BuildProjectResponse> BuildAsync(BuildProjectRequest request, CancellationToken ct)
         {
+            BuildCount++;
             Request = request;
-            return Task.FromResult(_response);
+            Requests.Add(request);
+            return Task.FromResult(Response);
         }
 
         public ValueTask DisposeAsync()

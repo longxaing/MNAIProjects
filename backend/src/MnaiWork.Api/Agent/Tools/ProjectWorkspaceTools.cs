@@ -296,14 +296,26 @@ public sealed class ReadProjectWorkspaceTool : IAgentTool
     public string Name => "read_project_workspace";
 
     public string Description =>
-        "List files or read one UTF-8 text file from a generated source ZIP in this conversation.";
+        "List files, search all files for text, or read up to 12 UTF-8 text files in one call from " +
+        "a generated source ZIP in this conversation. Prefer query to locate symbols and paths to " +
+        "read related product and test files together during repairs.";
 
     public string ParametersSchema => """
     {
       "type": "object",
       "properties": {
         "sourceArchiveFileId": { "type": "string" },
-        "path": { "type": "string", "description": "Omit to list all files." }
+                "path": { "type": "string", "description": "Read one file; omit to list all files." },
+                "query": {
+                    "type": "string",
+                    "description": "Case-insensitive literal text to search across workspace files."
+                },
+                "paths": {
+                    "type": "array",
+                    "description": "Read up to 12 related files in one call.",
+                    "items": { "type": "string" },
+                    "maxItems": 12
+                }
       },
       "required": ["sourceArchiveFileId"]
     }
@@ -339,18 +351,71 @@ public sealed class ReadProjectWorkspaceTool : IAgentTool
             var requestedPath = arguments.TryGetProperty("path", out var pathElement)
                 ? pathElement.GetString()
                 : null;
-            if (string.IsNullOrWhiteSpace(requestedPath))
+            var requestedPaths = arguments.TryGetProperty("paths", out var pathsElement)
+                && pathsElement.ValueKind == JsonValueKind.Array
+                ? pathsElement.EnumerateArray()
+                    .Select(item => item.GetString())
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Cast<string>()
+                    .ToList()
+                : new List<string>();
+            if (!string.IsNullOrWhiteSpace(requestedPath))
+            {
+                requestedPaths.Insert(0, requestedPath);
+            }
+            requestedPaths = requestedPaths.Distinct(StringComparer.Ordinal).ToList();
+            var query = arguments.TryGetProperty("query", out var queryElement)
+                ? queryElement.GetString()
+                : null;
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                if (query.Length > 200)
+                {
+                    return ToolResult.Fail("Workspace search query must not exceed 200 characters.");
+                }
+                var matches = files
+                    .OrderBy(file => file.Key, StringComparer.Ordinal)
+                    .SelectMany(file => file.Value
+                        .Split('\n')
+                        .Select((line, index) => new { file.Key, Line = index + 1, Text = line.TrimEnd('\r') }))
+                    .Where(match => match.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    .Take(200)
+                    .Select(match => $"{match.Key}:{match.Line}: {match.Text}")
+                    .ToArray();
+                return ToolResult.Ok(matches.Length == 0
+                    ? $"No workspace matches for '{query}'."
+                    : string.Join("\n", matches));
+            }
+            if (requestedPaths.Count == 0)
             {
                 return ToolResult.Ok(string.Join("\n", files.Keys.OrderBy(path => path)));
             }
-
-            var path = ProjectArchive.NormalizePath(requestedPath);
-            if (!files.TryGetValue(path, out var text))
+            if (requestedPaths.Count > 12)
             {
-                return ToolResult.Fail($"File '{path}' was not found in the source ZIP.");
+                return ToolResult.Fail("At most 12 workspace files can be read in one call.");
             }
-            var truncated = text.Length > 30_000;
-            return ToolResult.Ok(truncated ? text[..30_000] + "\n[truncated]" : text);
+
+            var output = new StringBuilder();
+            foreach (var requested in requestedPaths)
+            {
+                var path = ProjectArchive.NormalizePath(requested);
+                if (!files.TryGetValue(path, out var text))
+                {
+                    return ToolResult.Fail($"File '{path}' was not found in the source ZIP.");
+                }
+                if (output.Length > 0)
+                {
+                    output.AppendLine();
+                }
+                output.AppendLine($"===== {path} =====");
+                output.AppendLine(text.Length > 30_000 ? text[..30_000] + "\n[truncated]" : text);
+                if (output.Length > 100_000)
+                {
+                    output.AppendLine("[combined output truncated]");
+                    break;
+                }
+            }
+            return ToolResult.Ok(output.ToString());
         }
         catch (InvalidDataException ex)
         {
@@ -465,7 +530,8 @@ public sealed class BuildTestProjectTool : IAgentTool
                 request.SolutionPath,
                 request.BackendProjectPath,
                 request.FrontendDirectory,
-                ct);
+                ct,
+                $"{context.UserId}:{context.ThreadId}:{request.ProjectSlug}");
             var owner = new ArtifactOwner(context.UserId, context.ThreadId);
             var reportBytes = Encoding.UTF8.GetBytes(BuildReport(response));
             var report = await _storage.UploadAsync(
@@ -578,6 +644,9 @@ internal static class BuildFailureDiagnostics
     private static readonly Regex AnsiEscape = new(
         "\\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\\[[0-?]*[ -/]*[@-~])",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+    private static readonly Regex ProjectFilePath = new(
+        @"(?<path>(?:src|tests)[\\/][^():\r\n]+?\.(?:cs|csproj|ts|tsx|js|jsx|json))",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public static string Create(BuildProjectResponse response, string reportId)
     {
@@ -590,6 +659,11 @@ internal static class BuildFailureDiagnostics
         }
 
         var signature = ExtractSignature(diagnostic, response.Summary);
+        var implicatedFiles = ProjectFilePath.Matches(diagnostic)
+            .Select(match => match.Groups["path"].Value.Replace('\\', '/'))
+            .Distinct(StringComparer.Ordinal)
+            .Take(12)
+            .ToArray();
         var passedStages = string.Join(
             ", ",
             response.Steps.Where(step => step.Succeeded).Select(step => step.Name));
@@ -599,6 +673,7 @@ internal static class BuildFailureDiagnostics
             failedStage={failedStep?.Name ?? "pipeline setup"}
             exitCode={failedStep?.ExitCode.ToString() ?? "not available"}
             passedStages={passedStages}
+            implicatedFiles={(implicatedFiles.Length == 0 ? "not detected" : string.Join(", ", implicatedFiles))}
             summary={response.Summary}
 
             failureSignature:
@@ -607,7 +682,8 @@ internal static class BuildFailureDiagnostics
             failedStageDiagnostic:
             {diagnostic}
 
-            Repair the latest SourceZip using this evidence. Update all implicated product and test
+            Repair the latest SourceZip using this evidence. Read implicatedFiles together with the
+            nearest product or test counterpart in one batch. Update all implicated product and test
             files together, preserve valid tests and deployment contracts, then rerun build_test_project.
             """;
     }

@@ -120,7 +120,7 @@ and Azure AD tenant. `get_deployment_profile` exposes the same item read-only to
 Azure AD tenant returns `restartRequired=true`; restart the Agent API so authentication is rebuilt.
 Cosmos/OpenAI/Storage credentials and other existing secrets remain in Key Vault and are unaffected.
 
-Builds run in disposable E2B sandboxes; the Agent API host no longer needs the .NET SDK, Node.js,
+Builds run in project-scoped E2B sandboxes with short-lived dependency-cache reuse; the Agent API host no longer needs the .NET SDK, Node.js,
 npm, or browser binaries. Store the E2B API key as `E2B--ApiKey` and template ID as
 `E2B--TemplateId` in Key Vault. Neither value is added to Cosmos or passed into a sandbox. Build and
 publish the template in `backend/sandbox/e2bdocker` before enabling `BuildExecution`.

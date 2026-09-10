@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -18,13 +19,16 @@ public interface IE2BSandboxSession : IAsyncDisposable
         CancellationToken ct);
 }
 
-public sealed class BuildExecutor
+public sealed class BuildExecutor : IAsyncDisposable
 {
     private const int MaxArchiveBytes = 16 * 1024 * 1024;
+    private static readonly TimeSpan MinimumReuseWindow = TimeSpan.FromMinutes(1);
 
     private readonly IConfiguration _configuration;
     private readonly IE2BSandboxClient _sandboxes;
     private readonly ILogger<BuildExecutor> _logger;
+    private readonly ConcurrentDictionary<string, CachedSandbox> _cachedSandboxes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sandboxGates = new(StringComparer.Ordinal);
     private readonly object _concurrencyGate = new();
     private TaskCompletionSource _slotChanged = NewSlotSignal();
     private int _activeBuilds;
@@ -44,7 +48,8 @@ public sealed class BuildExecutor
         string solutionPath,
         string backendProjectPath,
         string frontendDirectory,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? sandboxCacheKey = null)
     {
         if (sourceArchive.Length is 0 or > MaxArchiveBytes)
         {
@@ -56,12 +61,13 @@ public sealed class BuildExecutor
             Convert.ToBase64String(sourceArchive),
             solutionPath,
             backendProjectPath,
-            frontendDirectory), ct);
+            frontendDirectory), ct, sandboxCacheKey);
     }
 
     public async Task<BuildProjectResponse> ExecuteAsync(
         BuildProjectRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? sandboxCacheKey = null)
     {
         if (!_configuration.GetValue("BuildExecution:Enabled", false))
         {
@@ -97,11 +103,10 @@ public sealed class BuildExecutor
                 request.TotalTimeoutMinutes,
                 request.CommandTimeoutMinutes,
                 request.PlaywrightVersion);
-            await using var sandbox = await _sandboxes.CreateAsync(
-                templateId,
-                timeout,
-                totalTimeout.Token);
-            var result = await sandbox.BuildAsync(request, totalTimeout.Token);
+            var result = string.IsNullOrWhiteSpace(sandboxCacheKey)
+                ? await ExecuteInEphemeralSandboxAsync(request, templateId, timeout, totalTimeout.Token)
+                : await ExecuteInCachedSandboxAsync(
+                    request, templateId, sandboxCacheKey, timeout, totalTimeout.Token);
             var failedStep = result.Steps.LastOrDefault(step => !step.Succeeded);
             if (result.Succeeded)
             {
@@ -130,6 +135,154 @@ public sealed class BuildExecutor
                 null,
                 null);
         }
+    }
+
+    private async Task<BuildProjectResponse> ExecuteInEphemeralSandboxAsync(
+        BuildProjectRequest request,
+        string templateId,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
+        await using var sandbox = await _sandboxes.CreateAsync(templateId, timeout, ct);
+        return await sandbox.BuildAsync(request, ct);
+    }
+
+    private async Task<BuildProjectResponse> ExecuteInCachedSandboxAsync(
+        BuildProjectRequest request,
+        string templateId,
+        string cacheKey,
+        TimeSpan sandboxLifetime,
+        CancellationToken ct)
+    {
+        await PruneExpiredSandboxesAsync(cacheKey);
+        var gate = _sandboxGates.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (_cachedSandboxes.TryGetValue(cacheKey, out var cached)
+                && (cached.ExpiresAt <= DateTimeOffset.UtcNow
+                    || !string.Equals(cached.TemplateId, templateId, StringComparison.Ordinal)))
+            {
+                _cachedSandboxes.TryRemove(cacheKey, out _);
+                await cached.Session.DisposeAsync();
+                cached = null;
+            }
+
+            if (cached is null)
+            {
+                cached = new CachedSandbox(
+                    templateId,
+                    await _sandboxes.CreateAsync(templateId, sandboxLifetime, ct),
+                    DateTimeOffset.UtcNow.Add(GetReuseWindow(sandboxLifetime)));
+                _cachedSandboxes[cacheKey] = cached;
+                _logger.LogInformation("Created project-scoped cached E2B sandbox.");
+            }
+            else
+            {
+                _logger.LogInformation("Reusing project-scoped cached E2B sandbox.");
+            }
+
+            var prioritizedRequest = request with { PreferredFirstStage = cached.LastFailedStage };
+            try
+            {
+                var result = await cached.Session.BuildAsync(prioritizedRequest, ct);
+                cached.LastFailedStage = result.Succeeded
+                    ? null
+                    : result.Steps.LastOrDefault(step => !step.Succeeded)?.Name;
+                return result;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.NotFound
+                or System.Net.HttpStatusCode.Gone)
+            {
+                _logger.LogWarning("Cached E2B sandbox expired remotely; recreating it once.");
+                _cachedSandboxes.TryRemove(cacheKey, out _);
+                await cached.Session.DisposeAsync();
+                cached = new CachedSandbox(
+                    templateId,
+                    await _sandboxes.CreateAsync(templateId, sandboxLifetime, ct),
+                    DateTimeOffset.UtcNow.Add(GetReuseWindow(sandboxLifetime)));
+                _cachedSandboxes[cacheKey] = cached;
+                var result = await cached.Session.BuildAsync(prioritizedRequest, ct);
+                cached.LastFailedStage = result.Succeeded
+                    ? null
+                    : result.Steps.LastOrDefault(step => !step.Succeeded)?.Name;
+                return result;
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static TimeSpan GetReuseWindow(TimeSpan sandboxLifetime)
+    {
+        var reserve = TimeSpan.FromMinutes(Math.Clamp(
+            sandboxLifetime.TotalMinutes / 3,
+            2,
+            10));
+        var reuseWindow = sandboxLifetime - reserve;
+        return reuseWindow > MinimumReuseWindow ? reuseWindow : MinimumReuseWindow;
+    }
+
+    private async Task PruneExpiredSandboxesAsync(string activeCacheKey)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var item in _cachedSandboxes.Where(item =>
+                     !string.Equals(item.Key, activeCacheKey, StringComparison.Ordinal)
+                     && item.Value.ExpiresAt <= now))
+        {
+            var gate = _sandboxGates.GetOrAdd(item.Key, _ => new SemaphoreSlim(1, 1));
+            if (!gate.Wait(0))
+            {
+                continue;
+            }
+            try
+            {
+                if (_cachedSandboxes.TryGetValue(item.Key, out var current)
+                    && ReferenceEquals(current, item.Value)
+                    && _cachedSandboxes.TryRemove(item.Key, out _))
+                {
+                    await current.Session.DisposeAsync();
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var cached in _cachedSandboxes.Values)
+        {
+            await cached.Session.DisposeAsync();
+        }
+        _cachedSandboxes.Clear();
+        foreach (var gate in _sandboxGates.Values)
+        {
+            gate.Dispose();
+        }
+        _sandboxGates.Clear();
+    }
+
+    private sealed class CachedSandbox
+    {
+        public CachedSandbox(
+            string templateId,
+            IE2BSandboxSession session,
+            DateTimeOffset expiresAt)
+        {
+            TemplateId = templateId;
+            Session = session;
+            ExpiresAt = expiresAt;
+        }
+
+        public string TemplateId { get; }
+        public IE2BSandboxSession Session { get; }
+        public DateTimeOffset ExpiresAt { get; }
+        public string? LastFailedStage { get; set; }
     }
 
     private async Task<IDisposable> AcquireBuildSlotAsync(CancellationToken ct)

@@ -10,6 +10,20 @@ namespace MnaiWork.Api.Tests;
 public sealed class SoftwareFactoryApprovalTests
 {
     [Fact]
+    public void ProjectTemplate_IncludesNewtonsoftWithoutDisablingCosmosCheck()
+    {
+        using var stream = typeof(CreateProjectWorkspaceTool).Assembly.GetManifestResourceStream(
+            "MnaiWork.Api.Agent.ProjectTemplate/src/backend/GeneratedApp.Api.csproj");
+        Assert.NotNull(stream);
+        var project = System.Xml.Linq.XDocument.Load(stream);
+        var reference = Assert.Single(project.Descendants("PackageReference"),
+            element => (string?)element.Attribute("Include") == "Newtonsoft.Json");
+        Assert.Equal("13.0.4", (string?)reference.Attribute("Version"));
+        Assert.DoesNotContain(project.Descendants("AzureCosmosDisableNewtonsoftJsonCheck"),
+            element => string.Equals(element.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ValidateArchitecture_KeepsExactApprovalValidUntilArchitectureChanges()
     {
         var history = new[]
@@ -92,7 +106,7 @@ public sealed class SoftwareFactoryApprovalTests
                     false,
                     1,
                     20,
-                    "Locator: getByText('published')\nExpected: visible\n" +
+                    "tests/blog.spec.ts:42:5 Locator: getByText('published')\nExpected: visible\n" +
                     "Generated API output:\nCosmosException: HTTP 500")
             },
             null,
@@ -104,6 +118,7 @@ public sealed class SoftwareFactoryApprovalTests
         Assert.Contains("passedStages=dotnet tests", diagnostic, StringComparison.Ordinal);
         Assert.Contains("Expected: visible", diagnostic, StringComparison.Ordinal);
         Assert.Contains("CosmosException: HTTP 500", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("implicatedFiles=tests/blog.spec.ts", diagnostic, StringComparison.Ordinal);
         Assert.Contains("Repair the latest SourceZip", diagnostic, StringComparison.Ordinal);
     }
 
@@ -124,6 +139,154 @@ public sealed class SoftwareFactoryApprovalTests
             "Playwright E2E|expected visible",
             AgentRunWorkflow.GetFailureSignature(
                 "failureSignature:\nPlaywright E2E|expected visible\n\nfailedStageDiagnostic:\nfull log"));
+    }
+
+    [Fact]
+    public void AgentRunWorkflow_ProvidesPersistedPackagesAfterExactUiApproval()
+    {
+        var build = Message(MessageRole.Tool, 3, "passed");
+        build.ToolName = "build_test_project";
+        build.Artifacts.AddRange(new[]
+        {
+            new Artifact { Id = "desktop", Kind = ArtifactKind.UiScreenshot },
+            new Artifact { Id = "mobile", Kind = ArtifactKind.UiScreenshot },
+            new Artifact
+            {
+                Id = "backend-package",
+                Kind = ArtifactKind.BackendPackage,
+                FileName = "blog-friends-text-backend.zip"
+            },
+            new Artifact
+            {
+                Id = "frontend-package",
+                Kind = ArtifactKind.FrontendPackage,
+                FileName = "blog-friends-text-frontend.zip"
+            }
+        });
+        var history = new[]
+        {
+            build,
+            Message(MessageRole.Assistant, 4, "Review the screenshots."),
+            Message(MessageRole.User, 5, SoftwareFactoryApprovals.UiPhrase)
+        };
+
+        var prompt = AgentRunWorkflow.BuildDeploymentContinuationPrompt(history);
+
+        Assert.NotNull(prompt);
+        Assert.Contains("projectSlug=blog-friends-text", prompt, StringComparison.Ordinal);
+        Assert.Contains("backendPackageFileId=backend-package", prompt, StringComparison.Ordinal);
+        Assert.Contains("frontendPackageFileId=frontend-package", prompt, StringComparison.Ordinal);
+        Assert.Contains("preview_azure_project", prompt, StringComparison.Ordinal);
+        Assert.Null(AgentRunWorkflow.BuildDeploymentContinuationPrompt(history[..2]));
+    }
+
+    [Fact]
+    public void AgentRunWorkflow_UsesOnlyTheMostRecentBuildCallForUiApproval()
+    {
+        var firstProject = SuccessfulBuild(3, "first-project");
+        var secondProject = SuccessfulBuild(5, "second-project");
+        var multipleProjects = new[]
+        {
+            firstProject,
+            Message(MessageRole.Assistant, 4, "Review the first project."),
+            secondProject,
+            Message(MessageRole.Assistant, 6, "Review the second project."),
+            Message(MessageRole.User, 7, SoftwareFactoryApprovals.UiPhrase)
+        };
+
+        var prompt = AgentRunWorkflow.BuildDeploymentContinuationPrompt(multipleProjects);
+
+        Assert.NotNull(prompt);
+        Assert.Contains("projectSlug=second-project", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("projectSlug=first-project", prompt, StringComparison.Ordinal);
+
+        var repeatedProjectBuilds = new[]
+        {
+            SuccessfulBuild(10, "same-project", "-v1"),
+            SuccessfulBuild(11, "same-project", "-v2"),
+            Message(MessageRole.User, 12, SoftwareFactoryApprovals.UiPhrase)
+        };
+        var repeatedBuildPrompt = AgentRunWorkflow.BuildDeploymentContinuationPrompt(repeatedProjectBuilds);
+
+        Assert.NotNull(repeatedBuildPrompt);
+        Assert.Contains("backendPackageFileId=same-project-v2-backend-package", repeatedBuildPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("same-project-v1-backend-package", repeatedBuildPrompt, StringComparison.Ordinal);
+
+        var failedLatestBuild = Message(MessageRole.Tool, 8, "build failed");
+        failedLatestBuild.ToolName = "build_test_project";
+        var afterFailure = multipleProjects[..^1]
+            .Append(failedLatestBuild)
+            .Append(Message(MessageRole.User, 9, SoftwareFactoryApprovals.UiPhrase))
+            .ToArray();
+
+        Assert.Null(AgentRunWorkflow.BuildDeploymentContinuationPrompt(afterFailure));
+    }
+
+    [Fact]
+    public void AgentRunWorkflow_InjectsLatestProjectSpecificRepairState()
+    {
+        var firstSource = Message(MessageRole.Tool, 1, "created");
+        firstSource.Artifacts.Add(new Artifact
+        {
+            Id = "first-source",
+            Kind = ArtifactKind.SourceZip,
+            FileName = "first-project-source.zip"
+        });
+        var targetSource = Message(MessageRole.Tool, 2, "updated");
+        targetSource.Artifacts.Add(new Artifact
+        {
+            Id = "target-source",
+            Kind = ArtifactKind.SourceZip,
+            FileName = "target-project-source.zip"
+        });
+        var failedBuild = Message(MessageRole.Tool, 3, "failedStage=dotnet tests");
+        failedBuild.ToolName = "build_test_project";
+        failedBuild.Artifacts.Add(new Artifact
+        {
+            Id = "target-report",
+            Kind = ArtifactKind.BuildReport,
+            FileName = "target-project-build-report.txt"
+        });
+        var history = new[]
+        {
+            firstSource,
+            targetSource,
+            failedBuild,
+            Message(MessageRole.User, 4, "CONTINUE REPAIR target-project")
+        };
+
+        var prompt = AgentRunWorkflow.BuildRepairContinuationPrompt(history);
+
+        Assert.NotNull(prompt);
+        Assert.Contains("projectSlug=target-project", prompt, StringComparison.Ordinal);
+        Assert.Contains("sourceArchiveFileId=target-source", prompt, StringComparison.Ordinal);
+        Assert.Contains("buildReportFileId=target-report", prompt, StringComparison.Ordinal);
+        Assert.Contains("failedStage=dotnet tests", prompt, StringComparison.Ordinal);
+        Assert.Null(AgentRunWorkflow.BuildRepairContinuationPrompt(history[..^1]));
+    }
+
+    private static ChatMessage SuccessfulBuild(int sequence, string projectSlug, string revision = "")
+    {
+        var build = Message(MessageRole.Tool, sequence, "passed");
+        build.ToolName = "build_test_project";
+        build.Artifacts.AddRange(new[]
+        {
+            new Artifact { Id = $"{projectSlug}{revision}-desktop", Kind = ArtifactKind.UiScreenshot },
+            new Artifact { Id = $"{projectSlug}{revision}-mobile", Kind = ArtifactKind.UiScreenshot },
+            new Artifact
+            {
+                Id = $"{projectSlug}{revision}-backend-package",
+                Kind = ArtifactKind.BackendPackage,
+                FileName = $"{projectSlug}-backend.zip"
+            },
+            new Artifact
+            {
+                Id = $"{projectSlug}{revision}-frontend-package",
+                Kind = ArtifactKind.FrontendPackage,
+                FileName = $"{projectSlug}-frontend.zip"
+            }
+        });
+        return build;
     }
 
     [Fact]
@@ -148,12 +311,33 @@ public sealed class SoftwareFactoryApprovalTests
         var skill = new SoftwareFactorySkill();
         var instructions = skill.LoadInstructions();
 
-        Assert.Equal("1.2.0", skill.Version);
+        Assert.Equal("1.2.4", skill.Version);
+        Assert.Contains("explicit Newtonsoft.Json 13.0.4 PackageReference", skill.LoadInstructions(), StringComparison.Ordinal);
+        Assert.Contains("do not follow that suggestion", skill.LoadInstructions(), StringComparison.Ordinal);
+        Assert.Contains("Mandatory pre-build code review", instructions, StringComparison.Ordinal);
+        Assert.Contains("read the actual latest SourceZip", instructions, StringComparison.Ordinal);
+        Assert.Contains("repair revision, read the actual latest SourceZip", instructions, StringComparison.Ordinal);
+        Assert.Contains("not another user approval gate", instructions, StringComparison.Ordinal);
+        Assert.Contains("testhost dependency-resolution failure", instructions, StringComparison.Ordinal);
+        Assert.Contains("If Microsoft.NET.Test.Sdk is missing, restore its template", instructions, StringComparison.Ordinal);
+        Assert.Contains("xunit.runner.visualstudio is an adapter", instructions, StringComparison.Ordinal);
+        Assert.Contains("not product coverage", instructions, StringComparison.Ordinal);
+        Assert.Contains("repairable generated source, not E2B initialization failure", instructions, StringComparison.Ordinal);
+        Assert.Contains("without real Azure", instructions, StringComparison.Ordinal);
+        Assert.Contains("pin an arbitrary Azure.Core version", instructions, StringComparison.Ordinal);
+        Assert.Contains("Before the first build and after each repair revision", SystemPrompts.Agent, StringComparison.Ordinal);
+        Assert.Contains("code review checklist on actual source", SystemPrompts.Agent, StringComparison.Ordinal);
         Assert.Contains("Existing project iteration", instructions, StringComparison.Ordinal);
         Assert.Contains("pinned into later LLM", instructions, StringComparison.Ordinal);
         Assert.Contains("APPROVE ARCHITECTURE", instructions, StringComparison.Ordinal);
         Assert.Contains("APPROVE UI", instructions, StringComparison.Ordinal);
         Assert.Contains("thread-scoped", instructions, StringComparison.Ordinal);
+        Assert.Contains("conservative syntax subset", instructions, StringComparison.Ordinal);
+        Assert.Contains("short, unique ASCII alphanumeric node IDs", instructions, StringComparison.Ordinal);
+        Assert.Contains("Avoid `&`, nested quotes", instructions, StringComparison.Ordinal);
+        Assert.Contains("brackets and quotes are balanced", instructions, StringComparison.Ordinal);
+        Assert.Contains("one `paths` call", instructions, StringComparison.Ordinal);
+        Assert.Contains("same user, conversation, and project", instructions, StringComparison.Ordinal);
     }
 
     [Fact]

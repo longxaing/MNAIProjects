@@ -17,7 +17,8 @@ public sealed record BuildProjectRequest(
     string FrontendDirectory,
     int CommandTimeoutMinutes = 15,
     int TotalTimeoutMinutes = 45,
-    string PlaywrightVersion = "1.62.1");
+    string PlaywrightVersion = "1.62.1",
+    string? PreferredFirstStage = null);
 
 public sealed record BuildStepResult(
     string Name,
@@ -149,10 +150,30 @@ public sealed class LocalBuildPipeline
             var backendProject = ResolveFile(root, request.BackendProjectPath, ".csproj");
             var frontend = ResolveDirectory(root, request.FrontendDirectory);
             var packageJsonPath = Path.Combine(frontend, "package.json");
-            EnsureBackendTestProjects(root, solution);
+            try
+            {
+                EnsureBackendTestProjects(root, solution);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Failed(new[]
+                {
+                    new BuildStepResult("backend test configuration", false, 1, 0, ex.Message)
+                });
+            }
             EnsureManagedIdentityContract(backendProject);
             EnsureFrontendScripts(packageJsonPath);
-            EnsureFrontendRuntimeConfiguration(frontend);
+            try
+            {
+                EnsureFrontendRuntimeConfiguration(frontend, request.FrontendDirectory);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Failed(new[]
+                {
+                    new BuildStepResult("frontend runtime configuration", false, 1, 0, ex.Message)
+                });
+            }
 
             var steps = new List<BuildStepResult>();
             var testResults = Path.Combine(root, "TestResults");
@@ -160,10 +181,42 @@ public sealed class LocalBuildPipeline
             {
                 Directory.Delete(testResults, recursive: true);
             }
+            var npmInstalled = false;
+            var frontendTestsCompleted = false;
+            var frontendBuildCompleted = false;
+            if (string.Equals(request.PreferredFirstStage, "frontend tests", StringComparison.Ordinal)
+                || string.Equals(request.PreferredFirstStage, "frontend build", StringComparison.Ordinal))
+            {
+                if (!await RunNpmRequiredAsync(steps, "npm ci",
+                        new[] { "ci", "--prefer-offline" }, frontend, totalTimeout.Token))
+                {
+                    return Failed(steps);
+                }
+                npmInstalled = true;
+                if (string.Equals(request.PreferredFirstStage, "frontend tests", StringComparison.Ordinal))
+                {
+                    if (!await RunNpmRequiredAsync(steps, "frontend tests",
+                            new[] { "run", "test" }, frontend, totalTimeout.Token))
+                    {
+                        return Failed(steps);
+                    }
+                    frontendTestsCompleted = true;
+                }
+                else
+                {
+                    if (!await RunNpmRequiredAsync(steps, "frontend build",
+                            new[] { "run", "build" }, frontend, totalTimeout.Token))
+                    {
+                        return Failed(steps);
+                    }
+                    frontendBuildCompleted = true;
+                }
+            }
             if (!await RunRequiredAsync(steps, "dotnet restore", "dotnet",
                     new[] { "restore", solution }, root, totalTimeout.Token)
                 || !await RunRequiredAsync(steps, "dotnet build", "dotnet",
-                    new[] { "build", solution, "-c", "Release", "--no-restore" },
+                    new[] { "build", solution, "-c", "Release", "--no-restore",
+                        "-p:AzureCosmosDisableNewtonsoftJsonCheck=false" },
                     root, totalTimeout.Token)
                 || !await RunRequiredAsync(steps, "dotnet tests", "dotnet",
                     new[]
@@ -176,12 +229,12 @@ public sealed class LocalBuildPipeline
             }
             EnsureBackendTestResults(testResults);
 
-            if (!await RunNpmRequiredAsync(steps, "npm ci",
-                    new[] { "ci" }, frontend, totalTimeout.Token)
-                || !await RunNpmRequiredAsync(steps, "frontend tests",
-                    new[] { "run", "test" }, frontend, totalTimeout.Token)
-                || !await RunNpmRequiredAsync(steps, "frontend build",
-                    new[] { "run", "build" }, frontend, totalTimeout.Token))
+            if ((!npmInstalled && !await RunNpmRequiredAsync(steps, "npm ci",
+                    new[] { "ci", "--prefer-offline" }, frontend, totalTimeout.Token))
+                || (!frontendTestsCompleted && !await RunNpmRequiredAsync(steps, "frontend tests",
+                    new[] { "run", "test" }, frontend, totalTimeout.Token))
+                || (!frontendBuildCompleted && !await RunNpmRequiredAsync(steps, "frontend build",
+                    new[] { "run", "build" }, frontend, totalTimeout.Token)))
             {
                 return Failed(steps);
             }
@@ -219,6 +272,7 @@ public sealed class LocalBuildPipeline
                     new[]
                     {
                         "publish", backendProject, "-c", "Release", "--no-restore",
+                        "-p:AzureCosmosDisableNewtonsoftJsonCheck=false",
                         "-o", backendOutput
                     }, root, totalTimeout.Token))
             {
@@ -846,6 +900,27 @@ public sealed class LocalBuildPipeline
                     "must contain exactly one project.");
             }
             var relative = Path.GetRelativePath(root, projects[0]);
+            var project = XDocument.Load(projects[0]);
+            var packages = project.Descendants()
+                .Where(element => element.Name.LocalName == "PackageReference")
+                .Select(element => element.Attribute("Include")?.Value)
+                .OfType<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var requiredPackage in new[]
+                     { "Microsoft.NET.Test.Sdk", "xunit", "xunit.runner.visualstudio" })
+            {
+                if (!packages.Contains(requiredPackage))
+                {
+                    throw new InvalidDataException(
+                        $"{relative.Replace('\\', '/')}: missing required PackageReference '{requiredPackage}'. " +
+                        "Restore the template test package references (Microsoft.NET.Test.Sdk 17.11.1, " +
+                        "xunit 2.9.2, xunit.runner.visualstudio 2.8.2), preserving product tests and " +
+                        "ProjectReference. The xUnit adapter alone is not the test SDK. A missing Test SDK " +
+                        "can cause testhost startup failures mentioning transitive dependencies such as " +
+                        "Azure.Core.dll. Do not add arbitrary Azure.Core versions or disable Cosmos checks; " +
+                        "repair the test project configuration and rerun build_test_project.");
+                }
+            }
             if (!solution.Contains(relative, StringComparison.OrdinalIgnoreCase)
                 && !solution.Contains(relative.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase)
                 && !solution.Contains(relative.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase))
@@ -953,22 +1028,46 @@ public sealed class LocalBuildPipeline
         }
     }
 
-    private static void EnsureFrontendRuntimeConfiguration(string frontendDirectory)
+    private static void EnsureFrontendRuntimeConfiguration(string frontendDirectory, string relativeDirectory)
     {
-        var index = File.ReadAllText(Path.Combine(frontendDirectory, "index.html"));
+        var prefix = relativeDirectory.Replace('\\', '/').TrimEnd('/');
+        var missing = new List<string>();
+        var indexPath = Path.Combine(frontendDirectory, "index.html");
+        if (!File.Exists(indexPath))
+        {
+            missing.Add($"{prefix}/index.html: missing file; restore the HTML entry point with a /runtime-config.js script before the app entry script.");
+        }
+        else if (!File.ReadAllText(indexPath).Contains("/runtime-config.js", StringComparison.Ordinal))
+        {
+            missing.Add($"{prefix}/index.html: missing /runtime-config.js script reference; load it before the app entry script.");
+        }
         var runtimeConfig = Path.Combine(frontendDirectory, "public", "runtime-config.js");
-        var source = string.Join('\n', Directory.EnumerateFiles(
-                Path.Combine(frontendDirectory, "src"), "*.*", SearchOption.AllDirectories)
+        if (!File.Exists(runtimeConfig))
+        {
+            missing.Add($"{prefix}/public/runtime-config.js: missing file; restore the template window.__APP_CONFIG__ placeholder with apiBaseUrl for deployment injection.");
+        }
+        var sourceDirectory = Path.Combine(frontendDirectory, "src");
+        var sourceFiles = Directory.Exists(sourceDirectory)
+            ? Directory.EnumerateFiles(sourceDirectory, "*.*", SearchOption.AllDirectories)
+            : Enumerable.Empty<string>();
+        var source = string.Join('\n', sourceFiles
             .Where(path => Path.GetExtension(path) is ".ts" or ".tsx")
             .Select(File.ReadAllText));
-
-        if (!index.Contains("/runtime-config.js", StringComparison.Ordinal)
-            || !File.Exists(runtimeConfig)
-            || !source.Contains("__APP_CONFIG__", StringComparison.Ordinal)
-            || !source.Contains("apiBaseUrl", StringComparison.Ordinal))
+        foreach (var requiredToken in new[] { "__APP_CONFIG__", "apiBaseUrl" })
+        {
+            if (!source.Contains(requiredToken, StringComparison.Ordinal))
+            {
+                missing.Add($"{prefix}/src: missing {requiredToken} in TypeScript sources; restore the typed window.__APP_CONFIG__.apiBaseUrl reader. A getApiBaseUrl wrapper is allowed.");
+            }
+        }
+        if (missing.Count > 0)
         {
             throw new InvalidDataException(
-                "Frontend must load /runtime-config.js and read window.__APP_CONFIG__.apiBaseUrl.");
+                string.Join('\n', missing) + "\nRead the listed existing files and API URL helper from the latest SourceZip " +
+                "with read_project_workspace (list files first if a path is missing). Repair all implicated files " +
+                "in one update_project_workspace revision, then rerun build_test_project. " +
+                "This is repairable source configuration, not E2B initialization failure. " +
+                "Do not stop after promising a repair or request another architecture approval.");
         }
     }
 

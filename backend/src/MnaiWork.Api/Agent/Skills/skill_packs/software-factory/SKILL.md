@@ -1,7 +1,7 @@
 ---
 name: software-factory
 description: "Create, test, and deploy React plus ASP.NET Core demo projects. Use for requests to build application code, write unit/integration/E2E tests, provision the fixed Azure infrastructure, or publish a generated project."
-version: 1.2.0
+version: 1.2.4
 category: engineering
 author: MnaiWork
 ---
@@ -40,8 +40,23 @@ Execute stages in order. Never report a later stage as complete unless its tool 
       by the currently approved architecture.
     - Include a fenced `mermaid` flowchart showing the React frontend, ASP.NET Core API, API contract,
        managed identity, Storage, Cosmos DB, Key Vault, test layers, E2B build, and Azure publication.
-         Use quoted node labels and `<br/>` for label line breaks. Never use literal `\n` sequences in
-         Mermaid nodes or subgraph titles.
+         - Generate Mermaid from this conservative syntax subset so the web client can render it reliably:
+            - Start with exactly `flowchart LR` or `flowchart TD`.
+            - Use short, unique ASCII alphanumeric node IDs such as `FE`, `API`, and `COSMOS`.
+            - Declare nodes as `ID["plain label"]`; use `subgraph ID["plain title"]` and close every
+               subgraph with `end`.
+            - Use only `-->` or `-.->` connections. When an edge needs a label, use
+               `SOURCE -->|plain label| TARGET` and keep the label short.
+            - Use `<br/>` for label line breaks. Never emit literal `\n` sequences in nodes or subgraph
+               titles.
+            - Avoid `&`, nested quotes, backticks, Markdown, braces, HTML other than `<br/>`, and long URLs
+               inside labels. Spell out `and` instead of `&` and move detailed API paths into surrounding text.
+            - Do not use directives, initialization blocks, custom classes, click handlers, icons, or
+               experimental diagram syntax.
+         - Before sending, self-check that the fence is exactly ` ```mermaid `, every node ID is declared
+            once, every referenced node exists, brackets and quotes are balanced, every subgraph has one
+            `end`, and no text follows the closing fence except the architecture explanation and approval
+            request. If uncertain, simplify labels and edges rather than emitting complex syntax.
     - Explain the main boundaries and tradeoffs briefly, then ask the user to raise corrections or send
        exactly `APPROVE ARCHITECTURE`. End the current turn. Do not call `create_project_workspace`,
        `update_project_workspace`, or any build/deployment tool in that turn.
@@ -96,6 +111,10 @@ Execute stages in order. Never report a later stage as complete unless its tool 
        BlobServiceClient, CosmosClient, and SecretClient with one DefaultAzureCredential; and read only
        `Storage:ServiceUri`, `Cosmos:Endpoint`, and `KeyVault:Uri`. Never use account keys, connection
        strings, SAS tokens, client secrets, or Cosmos keys.
+      - Preserve the backend template's explicit Newtonsoft.Json 13.0.4 PackageReference alongside
+         Microsoft.Azure.Cosmos. Do not set AzureCosmosDisableNewtonsoftJsonCheck=true. Using
+         System.Text.Json for application payloads does not prove that Cosmos SDK internals no longer
+         require Newtonsoft.Json. The runner forces the SDK dependency check on during build and publish.
     - Production persistence is mandatory. Store all durable structured application data in the
        configured Cosmos database/container through the injected `CosmosClient`. For a blog, this
        includes posts, users/profile data needed by the app, friendships, visibility, comments, and
@@ -134,12 +153,71 @@ Execute stages in order. Never report a later stage as complete unless its tool 
        Generated code must provide Development-only local/in-memory implementations for persistence or
        external dependencies so E2E tests never require Agent Azure credentials or production resources.
 6. **Validation and repair**
-   - Call `build_test_project`; a disposable E2B sandbox runs restore, build, backend
+   - **Mandatory pre-build code review:** Before the first `build_test_project` call and after every
+      repair revision, read the actual latest SourceZip with batched `read_project_workspace` calls.
+      Review product code, tests, and configuration together, not just the implementation plan.
+      Check approved acceptance criteria, frontend/API request and response contracts, validation and
+      authorization, persistence boundaries, DI registrations, actual Program entry-point declarations,
+      project/package references, and test SDK/runner configuration. Check test assertions and selectors
+      against the implemented behavior; remove stale template assumptions without weakening valid tests.
+      Record a concise review result with inspected file paths, concrete findings, and remaining risks.
+      Fix identified blockers in one workspace update and review the changed slice again before building.
+      This is an agent self-review, not another user approval gate. Do not stop the turn after review;
+      proceed to build and tests. Static review does not prove compilation, passing tests, or working UI.
+   - Preserve the template backend test stack: `Microsoft.NET.Test.Sdk`, `xunit`, and
+      `xunit.runner.visualstudio`; HTTP integration tests additionally use
+      `Microsoft.AspNetCore.Mvc.Testing` and `WebApplicationFactory` with the actual API entry point.
+      Unit tests exercise business behavior with fake/mock external dependencies, without real Azure
+      calls or credentials. A ProjectReference to the API can transitively bring in `Azure.Core` and
+      other Azure SDK packages even when a unit test never calls Azure; these are not test frameworks.
+      Preserve the template PackageReference entries and versions when editing test project files:
+      Microsoft.NET.Test.Sdk 17.11.1, xunit 2.9.2, and xunit.runner.visualstudio 2.8.2.
+      xunit.runner.visualstudio is an adapter, not a substitute for Microsoft.NET.Test.Sdk.
+      Tests must invoke production business behavior; use fakes only as dependencies of the system
+      under test. A test that only checks a fake repository's own List.Add is not product coverage.
+   - Classify failures before repairing: restore, compile, testhost startup, assertion, or E2E runtime.
+      A missing DLL named in a test `.deps.json` is a testhost dependency-resolution failure, not a
+      failed business assertion. Inspect the failing test project and referenced API project together:
+      Test SDK references, target frameworks, ProjectReference, IncludeAssets/ExcludeAssets/PrivateAssets,
+      and runtime-copy settings such as CopyLocalLockFileAssemblies. When runner diagnostics expose them,
+      compare resolved project.assets.json, the generated .deps.json, and actual output DLLs.
+      Do not edit generated .deps.json, pin an arbitrary Azure.Core version, or toggle
+      AzureCosmosDisableNewtonsoftJsonCheck to fix an unrelated missing runtime DLL. Do not blame the
+      sandbox without evidence or claim tests passed when testhost never started. If required runtime
+      evidence is unavailable, report the precise missing evidence rather than inventing a diagnosis.
+      For a testhost error saying an assembly from .deps.json was not found (including Azure.Core),
+      first read the failing test .csproj and compare its test harness references with the template
+      and a passing sibling test project. If Microsoft.NET.Test.Sdk is missing, restore its template
+      PackageReference before changing Azure dependencies. Preserve the real tests and API reference,
+      review the corrected project, then submit the new SourceZip to build_test_project for a fresh
+      restore/build/test. Only investigate resolved runtime assets and probing paths further if startup
+      still fails with the correct test SDK present. A server-reported `backend test configuration`
+      failure is repairable generated source, not E2B initialization failure. Never claim this specific
+      dependency problem is unfixable merely because two unrelated package changes did not resolve it.
+   - For CosmosClient/DocumentClient failures loading Newtonsoft.Json, inspect the latest backend
+      .csproj first. Restore the template Newtonsoft.Json 13.0.4 PackageReference and remove any
+      AzureCosmosDisableNewtonsoftJsonCheck=true bypass. An assembly version such as 10.0.0.0 is not
+      a NuGet package version to pin. Repair the latest SourceZip and rerun build_test_project; do not
+      request a sandbox template rebuild or substitute a dummy Cosmos endpoint to fix an assembly
+      load failure. If the reference already exists, inspect runtime asset exclusions and output
+      evidence before changing versions. Add a CosmosClient construction smoke test without network
+      calls alongside real business tests; health-only tests do not exercise lazy DI registrations.
+      SDK build errors may suggest bypassing this check; do not follow that suggestion. Fix the
+      missing dependency instead. Passing this check does not establish working Cosmos connectivity
+      or remove the requirement for Development-only local persistence in sandbox E2E tests.
+   - Call `build_test_project`; a project-scoped E2B sandbox runs restore, build, backend
      unit/integration tests, frontend Vitest, frontend build, Playwright E2E, and publish.
    - Fix product code when tests fail. Never delete, skip, or weaken a valid test merely to pass.
       - For a failed stage, inspect the latest BuildReport and define its failure signature from the failed
-         stage plus primary compiler/test error codes and messages. Update all files implicated by that
-         diagnostic together in one source revision, then rerun the complete pipeline.
+         stage plus primary compiler/test error codes and messages. Use `read_project_workspace` with
+         `query` to locate an unknown symbol, or one `paths` call to read all implicated product and test
+         files together; do not spend separate model iterations reading one known file at a time. Update
+         all files implicated by that diagnostic together in one source revision, then rerun the pipeline.
+      - Repair builds for the same user, thread, and project may briefly reuse one live sandbox so
+         template processes and NuGet/npm download caches remain warm. Every call still extracts
+         and validates the latest immutable SourceZip in a clean temporary workspace. A cached previous
+         frontend failure may run first for fast feedback, but a successful result must still complete
+         every required build, test, E2E, screenshot, and publish stage before packages are accepted.
       - Continue repairing while the failure signature changes or the error count/stage shows measurable
          progress. There is no fixed three-cycle limit. Stop when the same failure signature appears in two
          consecutive builds despite a relevant repair, when no safe targeted repair remains, or when the
@@ -222,8 +300,10 @@ and obtain both packages from `build_test_project`. Never simulate build, test, 
 ## Security invariants
 
 - Generated build/test processes receive no Agent Azure tokens, Key Vault values, or Cosmos credentials.
-- Builds run in one disposable secure E2B sandbox per invocation. The sandbox is deleted after success,
-   failure, cancellation, or timeout.
+- Builds reuse a secure E2B sandbox only within the same user, conversation, and project. Its provider
+   lifetime remains the validated `TotalTimeoutMinutes`; reuse stops early to reserve time before expiry.
+   It is deleted on cache expiry or API shutdown; source revisions remain
+   immutable, each build uses a clean temporary workspace, and no sandbox is shared across projects.
 - The model cannot provide an ARM template, role, or resource type. Deployment target and build
    settings come only from the Cosmos-backed DeploymentProfile, never from model tool arguments.
 - Infrastructure deployment requires a successful matching what-if and a persisted exact user approval message.

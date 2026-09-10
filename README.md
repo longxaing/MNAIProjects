@@ -4,7 +4,7 @@ A chat-based agent with two controlled production paths:
 
 - Create polished **Word documents (.docx)** and **PowerPoint decks (.pptx)** with Open XML.
 - Design, implement, test, review, and deploy **React + ASP.NET Core** applications through a
-  server-side software-factory Skill, disposable E2B sandboxes, and reviewed Azure ARM templates.
+  server-side software-factory Skill, project-scoped E2B sandboxes, and reviewed Azure ARM templates.
 
 - **Backend:** ASP.NET Core (.NET 8), Azure OpenAI **Responses API** (streaming), Azure **Cosmos DB**,
   Azure **Blob Storage**, Entra ID (AAD) auth.
@@ -213,7 +213,8 @@ dotnet run --project backend/tools/OpenAiSmoke
 - E2B API key and template ID are read from Key Vault and are never sent into a sandbox.
 - Generated applications use endpoint settings plus `DefaultAzureCredential`; Storage shared-key auth
   and Cosmos local auth are disabled by ARM.
-- Project builds run in disposable E2B sandboxes without Agent Azure/Cosmos/Key Vault credentials.
+- Project repair builds reuse an isolated E2B sandbox briefly for warm dependency caches; each build
+  uses a clean workspace and receives no Agent Azure/Cosmos/Key Vault credentials.
 - The dev auth handler is for local development only. In production, configure `AzureAd` so the API
   validates real Entra ID tokens.
 - Download links are short-lived SAS URLs; if SAS cannot be minted the API falls back to an

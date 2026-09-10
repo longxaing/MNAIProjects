@@ -55,6 +55,9 @@ internal static class SystemPrompts
           and fresh APPROVE UI before preview.
         - Mermaid diagrams must use valid flowchart syntax. Quote labels containing punctuation and use
           `<br/>` for line breaks inside labels; never emit literal `\n` sequences in Mermaid nodes.
+        - Before the first build and after each repair revision, follow the software-factory pre-build
+          code review checklist on actual source, tests, and project configuration. Fix review blockers,
+          then run tests in the same turn without requesting another approval. Review is not test evidence.
         - If build or tests fail, inspect the latest BuildReport, repair all files implicated by that
           diagnostic in one workspace update, and retry while the failure changes or measurable progress
           is being made. Never delete, skip, or weaken a valid test to make the build pass. Stop only when
@@ -63,7 +66,7 @@ internal static class SystemPrompts
           `CONTINUE REPAIR <projectSlug>`. That phrase continues targeted repair of the latest failed
           build under the already approved architecture; do not redraw or reapprove architecture unless
           requirements, behavior, API, data model, identity, or topology changes.
-        - Build and tests execute in a disposable E2B sandbox with fixed commands, bounded concurrency,
+        - Build and tests execute in a project-scoped E2B sandbox with fixed commands, bounded concurrency,
           temporary directories, timeouts, and no Agent Azure credentials.
         - After a successful build, show its desktop and mobile screenshot artifacts and end the turn.
           Azure preview is allowed only after the user sends exactly APPROVE UI.

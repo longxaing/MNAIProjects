@@ -80,6 +80,16 @@ public sealed class AgentRunner
                 ? SystemPrompts.Agent
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
             instructions = $"{instructions}\n\n{_skills.BuildCatalogPrompt()}";
+            var deploymentContinuation = AgentRunWorkflow.BuildDeploymentContinuationPrompt(history);
+            if (deploymentContinuation is not null)
+            {
+                instructions = $"{instructions}\n\n{deploymentContinuation}";
+            }
+            var repairContinuation = AgentRunWorkflow.BuildRepairContinuationPrompt(history);
+            if (repairContinuation is not null)
+            {
+                instructions = $"{instructions}\n\n{repairContinuation}";
+            }
 
             var reachedFinalResponse = false;
             var repairRequired = false;
@@ -362,6 +372,107 @@ internal static class AgentRunWorkflow
     public static bool RequiresCodeRepair(ToolResult result) =>
         !result.Success
         && result.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.BuildReport);
+
+    public static string? BuildRepairContinuationPrompt(IReadOnlyList<ChatMessage> history)
+    {
+        var latestUser = history.LastOrDefault(message => message.Role == MessageRole.User);
+        const string prefix = "CONTINUE REPAIR ";
+        if (latestUser is null
+            || !latestUser.Content.StartsWith(prefix, StringComparison.Ordinal)
+            || !CreateProjectWorkspaceTool.IsValidSlug(latestUser.Content[prefix.Length..].Trim()))
+        {
+            return null;
+        }
+
+        var projectSlug = latestUser.Content[prefix.Length..].Trim();
+        var reportFileName = $"{projectSlug}-build-report.txt";
+        var sourceFileName = $"{projectSlug}-source.zip";
+        var failedBuild = history.LastOrDefault(message =>
+            message.Role == MessageRole.Tool
+            && string.Equals(message.ToolName, "build_test_project", StringComparison.OrdinalIgnoreCase)
+            && message.Artifacts.Any(artifact =>
+                artifact.Kind == ArtifactKind.BuildReport
+                && string.Equals(artifact.FileName, reportFileName, StringComparison.Ordinal))
+            && !message.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.BackendPackage));
+        var source = history
+            .SelectMany(message => message.Artifacts.Select(artifact => (message.Sequence, Artifact: artifact)))
+            .LastOrDefault(item =>
+                item.Artifact.Kind == ArtifactKind.SourceZip
+                && string.Equals(item.Artifact.FileName, sourceFileName, StringComparison.Ordinal));
+        var report = failedBuild?.Artifacts.LastOrDefault(artifact =>
+            artifact.Kind == ArtifactKind.BuildReport
+            && string.Equals(artifact.FileName, reportFileName, StringComparison.Ordinal));
+        if (failedBuild is null
+            || report is null
+            || source.Artifact is null
+            || latestUser.Sequence <= failedBuild.Sequence)
+        {
+            return null;
+        }
+
+        return $"""
+            SERVER WORKFLOW: Continue the approved repair for projectSlug={projectSlug}. Load the
+            software-factory skill. The latest immutable source is sourceArchiveFileId={source.Artifact.Id}
+            and the latest failed build report is buildReportFileId={report.Id}. The persisted failed
+            build diagnostic follows:
+
+            {failedBuild.Content}
+
+            Read all implicated files in one read_project_workspace call using paths, apply one batched
+            update_project_workspace revision, then call build_test_project. Do not rediscover these IDs,
+            redraw the architecture, ask for approval, or provide manual build instructions.
+            """;
+    }
+
+    public static string? BuildDeploymentContinuationPrompt(IReadOnlyList<ChatMessage> history)
+    {
+        var latestUser = history.LastOrDefault(message => message.Role == MessageRole.User);
+        if (latestUser is null || !string.Equals(
+                latestUser.Content.Trim(),
+                SoftwareFactoryApprovals.UiPhrase,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var build = history.LastOrDefault(message =>
+            message.Role == MessageRole.Tool
+            && string.Equals(message.ToolName, "build_test_project", StringComparison.OrdinalIgnoreCase));
+        var backend = build?.Artifacts.LastOrDefault(
+            artifact => artifact.Kind == ArtifactKind.BackendPackage);
+        var frontend = build?.Artifacts.LastOrDefault(
+            artifact => artifact.Kind == ArtifactKind.FrontendPackage);
+        if (build is null
+            || backend is null
+            || frontend is null
+            || build.Artifacts.Count(artifact => artifact.Kind == ArtifactKind.UiScreenshot) < 2
+            || latestUser.Sequence <= build.Sequence)
+        {
+            return null;
+        }
+
+        var suffix = "-backend.zip";
+        if (!backend.FileName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var projectSlug = backend.FileName[..^suffix.Length];
+        if (!string.Equals(
+                frontend.FileName,
+                $"{projectSlug}-frontend.zip",
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return $"""
+            SERVER WORKFLOW: The user has approved the latest successfully tested UI. Load the
+            software-factory skill, then call preview_azure_project with projectSlug={projectSlug},
+            backendPackageFileId={backend.Id}, and frontendPackageFileId={frontend.Id}. These IDs come
+            from the same persisted successful build_test_project call. Do not rebuild, claim the IDs
+            are unavailable, ask the user to build ZIP files, or provide manual deployment steps.
+            """;
+    }
 
     public static string GetFailureSignature(string output)
     {

@@ -58,8 +58,11 @@ desktop/mobile PNG output. Docker Desktop must be running.
 
 ## Sandbox verification
 
-After building the E2B template, the Agent creates one secure sandbox for each build. For manual
-toolchain verification inside a sandbox, run:
+After building the E2B template, the Agent creates a secure sandbox scoped to one user, conversation,
+and project. Repair builds can reuse that sandbox during the configured E2B lifetime so NuGet and npm
+download caches remain warm; reuse stops early to leave time before provider expiry. Each request builds
+the supplied immutable SourceZip in a clean temporary workspace.
+For manual toolchain verification inside a sandbox, run:
 
 ```bash
 verify-toolchain
@@ -69,5 +72,6 @@ playwright --version
 ```
 
 `BuildExecutor` sends the source archive and non-secret build settings to the runner through an E2B
-traffic-token-protected URL. It deletes the sandbox after every result. Agent Azure tokens, Key Vault
-values, Cosmos credentials, and the E2B API key are never passed into the sandbox.
+traffic-token-protected URL. It deletes expired sandboxes and all cached sandboxes during graceful API
+shutdown. Agent Azure tokens, Key Vault values, Cosmos credentials, and the E2B API key are never passed
+into the sandbox.

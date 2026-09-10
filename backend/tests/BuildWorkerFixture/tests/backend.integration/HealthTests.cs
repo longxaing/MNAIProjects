@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 public sealed class HealthTests : IClassFixture<WebApplicationFactory<Program>>
@@ -11,6 +13,18 @@ public sealed class HealthTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task Health_ReturnsSuccess() =>
         Assert.True((await _client.GetAsync("/health")).IsSuccessStatusCode);
+
+    [Fact]
+    public async Task CosmosClient_ResolvesWithRuntimeDependencies()
+    {
+        await using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.UseSetting(
+                "Cosmos:Endpoint", "https://cosmos.example.test"));
+
+        var cosmos = factory.Services.GetRequiredService<CosmosClient>();
+
+        Assert.Equal(new Uri("https://cosmos.example.test"), cosmos.Endpoint);
+    }
 
     [Fact]
     public async Task Api_AllowsConfiguredFrontendOrigin()
