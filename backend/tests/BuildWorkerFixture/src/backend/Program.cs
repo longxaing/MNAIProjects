@@ -7,16 +7,30 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
-builder.Services.AddSingleton(sp => new BlobServiceClient(
-    new Uri(builder.Configuration["Storage:ServiceUri"]!),
-    sp.GetRequiredService<TokenCredential>()));
-builder.Services.AddSingleton(sp => new CosmosClient(
-    builder.Configuration["Cosmos:Endpoint"]!,
-    sp.GetRequiredService<TokenCredential>()));
-builder.Services.AddSingleton(sp => new SecretClient(
-    new Uri(builder.Configuration["KeyVault:Uri"]!),
-    sp.GetRequiredService<TokenCredential>()));
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<IDependencyCheck, LocalDependencyCheck>();
+    builder.Services.AddSingleton<INoteRepository, InMemoryNoteRepository>();
+    builder.Services.AddSingleton<IAppFileStore, InMemoryAppFileStore>();
+    builder.Services.AddSingleton<IAppSecrets, LocalAppSecrets>();
+}
+else
+{
+    builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+    builder.Services.AddSingleton(sp => new BlobServiceClient(
+        new Uri(builder.Configuration["Storage:ServiceUri"]!),
+        sp.GetRequiredService<TokenCredential>()));
+    builder.Services.AddSingleton(sp => new CosmosClient(
+        builder.Configuration["Cosmos:Endpoint"]!,
+        sp.GetRequiredService<TokenCredential>()));
+    builder.Services.AddSingleton(sp => new SecretClient(
+        new Uri(builder.Configuration["KeyVault:Uri"]!),
+        sp.GetRequiredService<TokenCredential>()));
+    builder.Services.AddSingleton<IDependencyCheck, AzureDependencyCheck>();
+    builder.Services.AddSingleton<INoteRepository, CosmosNoteRepository>();
+    builder.Services.AddSingleton<IAppFileStore, BlobAppFileStore>();
+    builder.Services.AddSingleton<IAppSecrets, KeyVaultAppSecrets>();
+}
 
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 {
@@ -38,9 +52,7 @@ app.MapGet("/health", (IConfiguration configuration) => Results.Ok(new
 app.MapGet("/ready", async (
     HttpRequest request,
     IConfiguration configuration,
-    BlobServiceClient blobs,
-    CosmosClient cosmos,
-    SecretClient secrets,
+    IServiceProvider services,
     CancellationToken ct) =>
 {
     var expectedFingerprint = configuration["Deployment:Fingerprint"] ?? "local";
@@ -49,17 +61,7 @@ app.MapGet("/ready", async (
     {
         return Results.NotFound();
     }
-    await blobs.GetBlobContainerClient(configuration["Storage:Container"]!)
-        .GetPropertiesAsync(cancellationToken: ct);
-    await cosmos.GetContainer(
-            configuration["Cosmos:Database"]!,
-            configuration["Cosmos:Container"]!)
-        .ReadContainerAsync(cancellationToken: ct);
-    await foreach (var _ in secrets.GetPropertiesOfSecretsAsync(ct)
-                       .AsPages(pageSizeHint: 1))
-    {
-        break;
-    }
+    await services.GetRequiredService<IDependencyCheck>().CheckAsync(ct);
     return Results.Ok(new
     {
         status = "ready",
@@ -68,6 +70,16 @@ app.MapGet("/ready", async (
     });
 }).AllowAnonymous();
 app.MapGet("/api/sum/{left:int}/{right:int}", (int left, int right) => Calculator.Add(left, right));
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet("/api/fixture-notes", (INoteRepository notes, CancellationToken ct) => notes.ListAsync(ct));
+    app.MapPost("/api/fixture-notes", async ([Microsoft.AspNetCore.Mvc.FromBody] string note, INoteRepository notes, CancellationToken ct) =>
+    {
+        await notes.AddAsync(note, ct);
+        return Results.Ok(note);
+    });
+}
 
 app.Run();
 

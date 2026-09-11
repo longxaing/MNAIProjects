@@ -1,7 +1,7 @@
 ---
 name: software-factory
-description: "Create, test, and deploy React plus ASP.NET Core demo projects. Use for requests to build application code, write unit/integration/E2E tests, provision the fixed Azure infrastructure, or publish a generated project."
-version: 1.2.7
+description: "Design polished, premium React interfaces with working ASP.NET Core backends, then test and deploy them. Use for application creation, UI design and refinement, unit/integration/E2E tests, fixed Azure infrastructure, and generated project publication."
+version: 1.4.0
 category: engineering
 author: MnaiWork
 ---
@@ -10,64 +10,71 @@ author: MnaiWork
 
 Use this skill whenever the user asks to create, modify, test, or deploy a software project.
 
+## UI Quality Contract
+
+**Premium frontend quality, even for simple pages.** Deliver a finished product, not a browser-default form.
+Visual finish and working behavior are joint requirements; respect the user's brand and preferences.
+
+### 1. Choose a visual direction
+
+- Define audience, primary action, layout, typography, palette, spacing, and one domain-specific detail
+  before coding; no extra approval round or on-screen design explanation is needed.
+- Sophistication does not require dark mode, neon, glass, or gradients. Use balanced neutrals and selective
+  accents, not a universal blue-black/purple skin. The first screen is the usable app, not a marketing hero.
+- Fit the domain: compact composer/readable blog feed, efficient operational controls. Do not invent features, fake activity,
+  or decorative dashboards; use relevant media only when useful.
+
+### 2. Implement the design, not just markup
+
+- Use CSS tokens, purposeful fonts/language fallbacks, readable type hierarchy, precise spacing, restrained
+  depth, consistent controls, accessible labels/focus, and library icons such as Lucide.
+- Let content determine section height. Use unframed sections, compact empty states, and cards only for
+  repeated items or framed tools; no nested cards, stretched empty panels, or decorative blobs.
+- Bind controls to actual handlers/API calls. Include empty/loading/error/success/disabled states and
+  meaningful short transitions; respect reduced motion. Preserve all workflows on mobile with stable
+  controls and readable wrapping, no overlap, clipping, horizontal overflow, or layout shifts.
+- Preserve styling during repairs. Check the React entry imports the stylesheet and built CSS/assets
+  match the components (or CSS-in-JS styles apply). When browser inspection is available, check failed
+  asset requests and computed styles; a CSS file in SourceZip alone does not prove it loaded.
+
+### 3. Review evidence before handoff
+
+- Inspect both screenshots only with actual image input/tools; assess visual finish separately from functional correctness.
+  Check composition, type, density, colors, controls, and mobile readability. Fix missing CSS, default
+  forms, excessive blank space, or tiny/clipped layouts and rebuild; never remove styling just to pass tests.
+- Screenshot IDs are not image inputs. Without image access, state that visual review is unverified
+  and show real artifacts for user review; never invent observations. Passing tests is not aesthetic proof.
+  Preserve the user's final visual approval rather than claiming an automated aesthetic score.
+
 ## Supported target
 
-- Frontend: React, TypeScript, Vite.
-- Backend: ASP.NET Core on .NET 8.
-- Tests: xUnit, WebApplicationFactory, and Playwright.
-- Azure services: only App Service API, Storage Account, Cosmos DB for NoSQL, and Key Vault.
-- The fixed subscription-scope orchestration template creates or updates the Generated Resource Group.
-   By default it also creates/updates a shared Windows B1 App Service Plan with one instance in
-   Canada Central (`canadacentral`). Keep `existingAppServicePlanResourceId` empty to create a new Plan
-   in the generated resource group; a reference Plan's read-only properties are not template inputs.
-   If the DeploymentProfile has
-   `existingAppServicePlanResourceId`, it references that existing same-subscription Plan, possibly in
-   another resource group, without creating, resizing, moving, or otherwise modifying it.
-- Only Windows App Service Plans are supported. `appServicePlanOs` must be `Windows`.
-   Do not offer Linux as an alternative. New Windows B1 creation still requires regional subscription
-   quota and incurs separate Plan charges; an existing B1 Plan does not guarantee new capacity.
-   The server checks the existing Plan's operating system, region, and Ready/Succeeded state before
-   preview and deployment. The generated Web App location must match the Plan. Shared apps compete
-   for the same compute capacity; reusing a Plan does not guarantee quota or application capacity.
-- These settings are read from `get_deployment_profile`, not inferred from screenshots or supplied
-   as deployment tool arguments. An administrator must update the profile; never change the target
-   implicitly after a quota failure. Do not attempt to convert an existing Windows/Linux Plan or site
-   to the other operating system. Existing sites need an explicit migration design or a new project slug.
-- Publish portable .NET 8 framework-dependent backend packages with `UseAppHost=false` and no
-   `RuntimeIdentifier`. Preserve SDK-generated `web.config` launching the root application DLL via
-   `dotnet` for Windows IIS. Do not add Linux-only native dependencies or startup assumptions for a
-   Windows target. E2B tests run on Linux and do not prove Windows IIS compatibility; cloud verification
-   is still required. If Windows package validation rejects an old ZIP, rebuild with the updated runner,
-   inspect new screenshots, and request fresh `APPROVE UI`; never patch a previously approved package.
-- Azure tenant, subscription, resource group, region, and shared App Service Plan come from the
-   Cosmos-backed DeploymentProfile and cannot be overridden by model tool arguments.
-
-Never claim support for arbitrary stacks, Azure resources, subscriptions, resource groups, roles, or templates.
+- React/TypeScript/Vite + ASP.NET Core .NET 8; xUnit/WebApplicationFactory, Vitest, and Playwright.
+- Only App Service API, Storage, Cosmos DB for NoSQL, and Key Vault using fixed server ARM templates.
+  Tenant/subscription/RG/regions/Plan/build settings come from `get_deployment_profile`, not model arguments.
+- Only Windows App Service Plans are supported (`appServicePlanOs=Windows`). Default: Windows B1,
+  one instance in Canada Central. Keep `existingAppServicePlanResourceId` empty to create a new Plan;
+  otherwise reuse that same-subscription Plan without creating, resizing, moving, or otherwise modifying it.
+  Match the Web App region to the Plan. Quota, charges, and shared capacity still apply; never silently
+  change region/Plan/OS after failure. Profile changes require an administrator; existing OS changes need migration.
+- Publish portable framework-dependent .NET 8 with `UseAppHost=false`, no RuntimeIdentifier, and root
+  SDK-generated IIS web.config launching the DLL through dotnet. Linux E2B tests do not prove Windows IIS compatibility.
+  Rebuild rejected packages; never patch approved ZIPs. Do not offer arbitrary stacks/resources/roles/templates.
 
 ## Mandatory approval handoff in final replies
 
-Before ending a turn, check the latest tool results and make the pending workflow stage explicit.
-Use the user's language for explanations, but preserve approval phrases exactly, including spaces.
+Use the user's language, but preserve exact approval phrases. Never replace the approval request with a feature summary;
+place the approval handoff last. Report only tool-backed stages, not plans or assistant summaries.
 
-- After a successful build and acceptable desktop/mobile screenshots, end with a dedicated next-step
-   section containing all three items: this tested revision has not been remotely deployed; ask the
-   user to inspect both screenshots and reply exactly `APPROVE UI`; explain that this approves only
-   the UI and starts an Azure resource-change preview, not a deployment. After preview, a separate
-   `DEPLOY <projectSlug>` confirmation will be required. Do not request DEPLOY at the build stage.
-- Suggested build-stage closing (translate the prose, not the approval phrase):
-   "Build and tests passed. This revision has not been remotely deployed. Please review the desktop
-   and mobile screenshots. To approve the UI and preview Azure deployment changes, reply exactly
-   `APPROVE UI`. Actual deployment requires a separate confirmation after the preview."
-- Never replace the approval request with a feature summary, extension suggestions, or a generic
-   invitation to keep iterating. Keep the feature summary brief and place the approval handoff last.
-   Before sending, verify that the final reply explicitly asks for `APPROVE UI`, not merely mentions it.
-   If the UI needs corrections, repair and rebuild instead of asking for approval of a deficient UI.
-- After a successful Azure preview, summarize the returned resource changes and end by requesting
-   the exact returned `DEPLOY <projectSlug>` phrase. Do not invent the slug or claim deployment occurred.
-   If preview fails, report the blocker instead of requesting deployment approval.
-- Claim remote deployment success and provide the returned access URL only after publication,
-   health checks, and cloud E2E succeed. Downloadable ZIPs and sandbox tests are not evidence of remote
-   deployment. For an existing deployment, distinguish the previous live version from this new revision.
+| Completed stage | Required handoff |
+| --- | --- |
+| Architecture proposal | Ask for `APPROVE ARCHITECTURE`; stop before creating/updating source. |
+| Build, tests, packages and screenshots | Show both screenshots; state this tested revision has not been remotely deployed; ask to reply exactly `APPROVE UI` for UI approval and Azure preview only. Do not request DEPLOY at the build stage. |
+| Successful Azure preview | Summarize changes; ask for the exact returned `DEPLOY <projectSlug>` phrase in a subsequent user turn. |
+| Deployment/publication/probes | Report actual results and returned URL; distinguish the previous live version from this new revision. |
+
+The build-stage reply explicitly asks for `APPROVE UI`, not merely mentions it. Fix known UI blockers first.
+If preview fails, report the blocker, not a deployment approval request. Full cloud E2E is not implemented;
+never claim it passed or confuse sandbox tests with remote verification.
 
 ## Mandatory workflow
 
@@ -81,38 +88,17 @@ Execute stages in order. Never report a later stage as complete unless its tool 
    - Convert the request into concrete user flows and acceptance criteria.
    - Ask a question only when a missing answer changes architecture or observable behavior.
 2. **Architecture review**
-   - Before creating a project, or before editing source for an architectural change, respond with a
-      concrete architecture proposal. Do not repeat this step for implementation-only changes covered
-      by the currently approved architecture.
-    - Include a fenced `mermaid` flowchart showing the React frontend, ASP.NET Core API, API contract,
-       managed identity, Storage, Cosmos DB, Key Vault, test layers, E2B build, and Azure publication.
-         - Generate Mermaid from this conservative syntax subset so the web client can render it reliably:
-            - Start with exactly `flowchart LR` or `flowchart TD`.
-            - Use short, unique ASCII alphanumeric node IDs such as `FE`, `API`, and `COSMOS`.
-            - Declare nodes as `ID["plain label"]`; use `subgraph ID["plain title"]` and close every
-               subgraph with `end`.
-            - Use only `-->` or `-.->` connections. When an edge needs a label, use
-               `SOURCE -->|plain label| TARGET` and keep the label short.
-            - Use `<br/>` for label line breaks. Never emit literal `\n` sequences in nodes or subgraph
-               titles.
-            - Avoid `&`, nested quotes, backticks, Markdown, braces, HTML other than `<br/>`, and long URLs
-               inside labels. Spell out `and` instead of `&` and move detailed API paths into surrounding text.
-            - Do not use directives, initialization blocks, custom classes, click handlers, icons, or
-               experimental diagram syntax.
-         - Before sending, self-check that the fence is exactly ` ```mermaid `, every node ID is declared
-            once, every referenced node exists, brackets and quotes are balanced, every subgraph has one
-            `end`, and no text follows the closing fence except the architecture explanation and approval
-            request. If uncertain, simplify labels and edges rather than emitting complex syntax.
-    - Explain the main boundaries and tradeoffs briefly, then ask the user to raise corrections or send
-       exactly `APPROVE ARCHITECTURE`. End the current turn. Do not call `create_project_workspace`,
-       `update_project_workspace`, or any build/deployment tool in that turn.
-    - End immediately after the approval request. Do not ask the user to choose a language/framework,
-       offer another stack, propose a simplified implementation, or append additional next steps.
-    - If the user requests changes, revise and render the architecture again, then wait for a fresh exact
-       `APPROVE ARCHITECTURE` message.
-      - The exact approved Mermaid message is an implementation contract and is pinned into later LLM
-         context even when older conversation turns are summarized. Implement against it; do not silently
-         substitute a different topology, identity model, API boundary, or data flow.
+   - Before project creation or architectural changes, propose the flows/API, identity, persistence, and
+     tradeoffs. Include React, ASP.NET Core, Azure dependencies, tests, E2B, and publication in Mermaid.
+   - Use this conservative syntax subset: fenced `mermaid`, `flowchart LR` or `flowchart TD`,
+     short, unique ASCII alphanumeric node IDs, `ID["plain label"]`, `-->`/`-.->`, and short edge labels.
+     Optional `subgraph ID["title"]` ends with `end`; use `<br/>` for label breaks, not literal `\n`.
+     Avoid `&`, nested quotes, Markdown, directives, custom classes, icons, and experimental syntax.
+     Verify referenced nodes exist and brackets and quotes are balanced; simplify uncertain diagrams.
+   - Ask for exact `APPROVE ARCHITECTURE`; do not create/update source or build/deploy in that turn.
+     End immediately after the approval request, with no alternate stack or extra choices.
+   - The approved Mermaid is pinned into later LLM context as the implementation contract. Do not silently
+     change topology, identity, API, or data flow; use the Existing project iteration rules for changes.
 3. **Workspace after approval**
       - `create_project_workspace` is server-gated and fails unless the latest user message after a
          Mermaid architecture proposal is exactly `APPROVE ARCHITECTURE`.
@@ -128,193 +114,108 @@ Execute stages in order. Never report a later stage as complete unless its tool 
     - Use the fixed layout: `GeneratedApp.sln`, `src/backend`, `src/frontend`,
        `tests/backend.unit`, and `tests/backend.integration`.
 4. **Implementation**
-   - Implement frontend and backend together against an explicit API contract.
-   - Do not place secrets or Azure credentials in generated code.
-   - Build the complete user-facing workflow from the approved requirements, not a developer demo or
-      API exerciser. Never expose raw author/user IDs as the primary UX when the application can derive
-      identity from its authenticated user or Development test persona. Do not present a publish-only
-      screen when the requested workflow also requires browsing, friendship, history, or management.
-   - Give every generated frontend a deliberate, domain-specific visual direction. Do not ship an
-      unstyled browser-default form. Define a compact design system in CSS with typography, spacing,
-      foreground/background/surface/accent/status colors, borders, focus states, and responsive
-      breakpoints. Use a purposeful font stack, strong information hierarchy, and restrained motion;
-      avoid generic purple gradients, decorative blobs, oversized marketing heroes, and nested cards.
-   - Make the first viewport the usable application. Provide navigation for all primary workflows,
-      polished empty/loading/error/success/disabled states, accessible labels and keyboard focus, and
-      touch-friendly controls. Desktop and mobile must preserve the same capabilities without overlap,
-      clipped text, horizontal page scrolling, or layout shifts.
-   - Match interaction patterns to the domain: feeds should be scannable, composers should make the
-      primary action obvious, destructive actions need confirmation, and identity/status should be
-      visible without asking users for implementation identifiers. Use icons only when their meaning is
-      familiar or accompanied by an accessible label.
-    - Read the current template `Program.cs` before changing startup. Preserve its health, readiness,
-       Azure client, CORS, and deployment-manifest code. Add registrations and middleware directly, or
-       include the complete extension-method implementation in the same source revision. Never call
-       invented helpers such as `AddDefaultServices` or `UseDefaultPipeline` unless their definitions
-       are present in the workspace and compile against the current template.
-    - Preserve the template managed-identity contract. The backend must reference Azure.Identity,
-       Azure.Storage.Blobs, Microsoft.Azure.Cosmos, and Azure.Security.KeyVault.Secrets; construct
-       BlobServiceClient, CosmosClient, and SecretClient with one DefaultAzureCredential; and read only
-       `Storage:ServiceUri`, `Cosmos:Endpoint`, and `KeyVault:Uri`. Never use account keys, connection
-       strings, SAS tokens, client secrets, or Cosmos keys.
-      - Preserve the backend template's explicit Newtonsoft.Json 13.0.4 PackageReference alongside
-         Microsoft.Azure.Cosmos. Do not set AzureCosmosDisableNewtonsoftJsonCheck=true. Using
-         System.Text.Json for application payloads does not prove that Cosmos SDK internals no longer
-         require Newtonsoft.Json. The runner forces the SDK dependency check on during build and publish.
-    - Production persistence is mandatory. Store all durable structured application data in the
-       configured Cosmos database/container through the injected `CosmosClient`. For a blog, this
-       includes posts, users/profile data needed by the app, friendships, visibility, comments, and
-       likes when those features exist. In-memory repositories are permitted only behind an explicit
-       Development/test environment branch and must never be the Production registration.
-    - Use Blob Storage for durable unstructured/binary application objects such as uploaded images or
-       generated files. Do not duplicate text-only records into Blob merely to use the provisioned
-       service; a text-only blog uses Cosmos for its business data while Blob remains part of the fixed
-       infrastructure and `/ready` dependency contract.
-    - Preserve the template CORS contract: read `Frontend:Origin`, register CORS for that exact origin,
-       and call `UseCors`. ARM supplies the deployed Storage static-site origin.
-    - Preserve `/runtime-config.js` and the typed `window.__APP_CONFIG__.apiBaseUrl` reader. Frontend API
-       calls must use this runtime value, never a build-time VITE API URL or hard-coded backend host.
-    - The backend must expose an anonymous `/health` endpoint.
-      - Preserve the `/ready` deployment probe protected by the current fingerprint query. It must reject
-         mismatches before performing harmless authenticated reads
-         against the configured appdata Blob container, Cosmos container metadata, and Key Vault secret
-         metadata, then return `Deployment:Fingerprint`. Deployment waits for this probe before success.
-    - The frontend must define non-watch `test`, `build`, and `test:e2e` scripts using
-       Vitest and Playwright. Preserve the template lock file and use the template's exact
-       `@playwright/test` version because it matches the Worker browser image.
+   - Implement complete approved workflows, frontend/API/tests/styling together, not a developer API demo.
+     Derive identity instead of exposing raw user IDs as UX; confirm destructive actions.
+   - Read template Program.cs before changing startup. Preserve health/readiness, manifests, CORS, and DI.
+     Never call invented helpers such as AddDefaultServices or UseDefaultPipeline without their implementations.
+   - Preserve `builder.Environment.IsDevelopment()` and interface-based business services:
+
+     | Dependency | Development only | All other environments |
+     | --- | --- | --- |
+     | Domain repository example | InMemoryNoteRepository | CosmosNoteRepository |
+     | Files | InMemoryAppFileStore | BlobAppFileStore |
+     | Secrets | LocalAppSecrets / non-sensitive DevelopmentSecrets | KeyVaultAppSecrets |
+     | Readiness | LocalDependencyCheck | AzureDependencyCheck |
+
+     Replace starter note behavior/tests with the approved domain, retaining both implementations.
+     In-memory repositories are Development-only; never register an in-memory repository unconditionally.
+     Keep HTTP, validation, authorization and business logic real; substitute only external I/O dependencies.
+     Sandbox has no Azure credentials: no live Azure requests, CLI login, dummy endpoints, or platform secrets.
+     Missing local test values fail explicitly; Production must never fall back to mocks on any failure.
+   - Production constructs BlobServiceClient, CosmosClient, and SecretClient with one DefaultAzureCredential.
+     Preserve Azure.Identity, Azure.Storage.Blobs, Microsoft.Azure.Cosmos, Azure.Security.KeyVault.Secrets,
+     and the explicit Newtonsoft.Json 13.0.4 PackageReference. Never bypass the Cosmos dependency check.
+     Read `Storage:ServiceUri`, `Cosmos:Endpoint`, `KeyVault:Uri` and configured database/container names;
+     no keys, connection strings, SAS, or client secrets.
+   - Production persistence is mandatory: structured records in Cosmos, binary objects in Blob. Do not
+     duplicate text records into Blob just to use it. Match `/partitionKey`, lowercase `id`/`partitionKey`,
+     type discriminators, SDK partition values, and query casing to the actual Cosmos serializer;
+     System.Text.Json attributes do not configure the default Newtonsoft serializer. Scope queries by type
+     and authorization; add offline serialization contract tests for JSON names, key equality and round trips.
+   - Production identity and authorization follow the approved design: no fixed demo users or trusted
+     client-supplied author IDs. Keep seed/persona/fixture endpoints Development-only.
+   - Keep anonymous `/health`; `/ready` checks the fingerprint before resolving dependencies. Local checks
+     do not call Azure; Production reads appdata Blob properties, Cosmos container and KV secret metadata,
+     then returns `Deployment:Fingerprint`. Metadata access is not proof of working business writes.
+   - Preserve exact-origin CORS from `Frontend:Origin` and `UseCors`. Every frontend API call uses
+     `/runtime-config.js` via `window.__APP_CONFIG__.apiBaseUrl`, not hard-coded hosts or VITE build-time URLs.
+   - Preserve lock files, pinned Playwright version, and non-watch `test`, `build`, `test:e2e` scripts.
 5. **Tests**
-   - Add backend unit tests for business rules and failure paths.
-   - Add integration tests for HTTP, auth, validation, and persistence boundaries.
-   - Add Playwright E2E tests for every acceptance criterion that is practical through the UI.
-   - Treat template tests as placeholders, not product coverage. Before the first build, inspect and
-      update every retained template assertion so it matches the generated product. In particular,
-      replace placeholder names such as `Generated App`, sample Calculator assertions, and generic
-      render-only E2E checks unless that behavior remains intentionally relevant. Product code, visible
-      labels, selectors, and tests must be changed together in the same source revision.
-   - Playwright must exercise the actual primary workflow, not merely assert that a heading or button
-      exists. Cover navigation, a successful create/read flow, one validation or failure state, and the
-      resulting visible data. Add desktop and mobile assertions for primary navigation and ensure the
-      page has no horizontal overflow or uncaught browser errors.
-    - The E2B runner starts the generated API on `http://127.0.0.1:5000` and Vite preview on port 4173.
-       Generated code must provide Development-only local/in-memory implementations for persistence or
-       external dependencies so E2E tests never require Agent Azure credentials or production resources.
+   - Treat template tests as placeholders: replace `Generated App`/Calculator/fixture assertions with
+     product business rules, HTTP/auth/validation and failure-path tests, not tests of a fake's own behavior.
+   - Verify Development API/file/secret/readiness without Azure clients; Production/Staging select real
+     implementations and missing Production configuration fails. Client construction and serialization
+     tests remain offline; they do not prove cloud connectivity, RBAC, or durable business I/O.
+   - Playwright must exercise the actual primary workflow: navigation, real click/create/read/reload,
+     invalid input and API-error recovery on desktop/mobile, with no overflow or page errors. Invoke
+     matchers: `.toBeVisible` without calling it is not an assertion. Never substitute page.route mocks,
+     direct request.post, input-value or heading-only checks for the successful UI-to-API flow.
+   - E2B starts Development API on `http://127.0.0.1:5000`, Vite preview on 4173. The worker owns and executes
+     an additional browser gate using `src/frontend/acceptance.json`, not under public/:
+
+     ```json
+     {"version":1,"name":"Create a post","fields":[{"label":"Title","value":"{{unique}}"},{"label":"Content","value":"Acceptance body"}],"submitButton":"Publish","mutation":{"method":"POST","path":"/api/posts"},"readPath":"/api/posts/feed","expectedText":"{{unique}}"}
+     ```
+
+     Use exact accessible labels/button names, POST/PUT/PATCH mutations, exact `/api/` paths without query
+     or fragment, 1-12 labelled text fields, and `{{unique}}` in a field and expectedText. The worker checks
+     a successful API write, fresh-document GET JSON and visible new text on both viewports, without
+     generated mocks/service workers. Failures yield BuildReports, not deployable ZIPs.
+     V1 supports single-page text-input create/read only, not login setup, multistep navigation, uploads,
+     or read-only applications. Report limitations; never invent product flows, a test-only UI, or retain
+     fixture endpoints to bypass them. This minimum gate is not full acceptance or Production verification.
 6. **Validation and repair**
-   - **Mandatory pre-build code review:** Before the first `build_test_project` call and after every
-      repair revision, read the actual latest SourceZip with batched `read_project_workspace` calls.
-      Review product code, tests, and configuration together, not just the implementation plan.
-      Check approved acceptance criteria, frontend/API request and response contracts, validation and
-      authorization, persistence boundaries, DI registrations, actual Program entry-point declarations,
-      project/package references, and test SDK/runner configuration. Check test assertions and selectors
-      against the implemented behavior; remove stale template assumptions without weakening valid tests.
-      Record a concise review result with inspected file paths, concrete findings, and remaining risks.
-      Fix identified blockers in one workspace update and review the changed slice again before building.
-      This is an agent self-review, not another user approval gate. Do not stop the turn after review;
-      proceed to build and tests. Static review does not prove compilation, passing tests, or working UI.
-   - Preserve the template backend test stack: `Microsoft.NET.Test.Sdk`, `xunit`, and
-      `xunit.runner.visualstudio`; HTTP integration tests additionally use
-      `Microsoft.AspNetCore.Mvc.Testing` and `WebApplicationFactory` with the actual API entry point.
-      Unit tests exercise business behavior with fake/mock external dependencies, without real Azure
-      calls or credentials. A ProjectReference to the API can transitively bring in `Azure.Core` and
-      other Azure SDK packages even when a unit test never calls Azure; these are not test frameworks.
-      Preserve the template PackageReference entries and versions when editing test project files:
-      Microsoft.NET.Test.Sdk 17.11.1, xunit 2.9.2, and xunit.runner.visualstudio 2.8.2.
-      xunit.runner.visualstudio is an adapter, not a substitute for Microsoft.NET.Test.Sdk.
-      Tests must invoke production business behavior; use fakes only as dependencies of the system
-      under test. A test that only checks a fake repository's own List.Add is not product coverage.
-   - Classify failures before repairing: restore, compile, testhost startup, assertion, or E2E runtime.
-      A missing DLL named in a test `.deps.json` is a testhost dependency-resolution failure, not a
-      failed business assertion. Inspect the failing test project and referenced API project together:
-      Test SDK references, target frameworks, ProjectReference, IncludeAssets/ExcludeAssets/PrivateAssets,
-      and runtime-copy settings such as CopyLocalLockFileAssemblies. When runner diagnostics expose them,
-      compare resolved project.assets.json, the generated .deps.json, and actual output DLLs.
-      Do not edit generated .deps.json, pin an arbitrary Azure.Core version, or toggle
-      AzureCosmosDisableNewtonsoftJsonCheck to fix an unrelated missing runtime DLL. Do not blame the
-      sandbox without evidence or claim tests passed when testhost never started. If required runtime
-      evidence is unavailable, report the precise missing evidence rather than inventing a diagnosis.
-      For a testhost error saying an assembly from .deps.json was not found (including Azure.Core),
-      first read the failing test .csproj and compare its test harness references with the template
-      and a passing sibling test project. If Microsoft.NET.Test.Sdk is missing, restore its template
-      PackageReference before changing Azure dependencies. Preserve the real tests and API reference,
-      review the corrected project, then submit the new SourceZip to build_test_project for a fresh
-      restore/build/test. Only investigate resolved runtime assets and probing paths further if startup
-      still fails with the correct test SDK present. A server-reported `backend test configuration`
-      failure is repairable generated source, not E2B initialization failure. Never claim this specific
-      dependency problem is unfixable merely because two unrelated package changes did not resolve it.
-   - For CosmosClient/DocumentClient failures loading Newtonsoft.Json, inspect the latest backend
-      .csproj first. Restore the template Newtonsoft.Json 13.0.4 PackageReference and remove any
-      AzureCosmosDisableNewtonsoftJsonCheck=true bypass. An assembly version such as 10.0.0.0 is not
-      a NuGet package version to pin. Repair the latest SourceZip and rerun build_test_project; do not
-      request a sandbox template rebuild or substitute a dummy Cosmos endpoint to fix an assembly
-      load failure. If the reference already exists, inspect runtime asset exclusions and output
-      evidence before changing versions. Add a CosmosClient construction smoke test without network
-      calls alongside real business tests; health-only tests do not exercise lazy DI registrations.
-      SDK build errors may suggest bypassing this check; do not follow that suggestion. Fix the
-      missing dependency instead. Passing this check does not establish working Cosmos connectivity
-      or remove the requirement for Development-only local persistence in sandbox E2E tests.
-   - Call `build_test_project`; a project-scoped E2B sandbox runs restore, build, backend
-     unit/integration tests, frontend Vitest, frontend build, Playwright E2E, and publish.
-   - Fix product code when tests fail. Never delete, skip, or weaken a valid test merely to pass.
-      - For a failed stage, inspect the latest BuildReport and define its failure signature from the failed
-         stage plus primary compiler/test error codes and messages. Use `read_project_workspace` with
-         `query` to locate an unknown symbol, or one `paths` call to read all implicated product and test
-         files together; do not spend separate model iterations reading one known file at a time. Update
-         all files implicated by that diagnostic together in one source revision, then rerun the pipeline.
-      - Repair builds for the same user, thread, and project may briefly reuse one live sandbox so
-         template processes and NuGet/npm download caches remain warm. Every call still extracts
-         and validates the latest immutable SourceZip in a clean temporary workspace. A cached previous
-         frontend failure may run first for fast feedback, but a successful result must still complete
-         every required build, test, E2E, screenshot, and publish stage before packages are accepted.
-      - Continue repairing while the failure signature changes or the error count/stage shows measurable
-         progress. There is no fixed three-cycle limit. Stop when the same failure signature appears in two
-         consecutive builds despite a relevant repair, when no safe targeted repair remains, or when the
-         server run budget is exhausted. Report the remaining evidence and ask the user to send exactly
-         `CONTINUE REPAIR <projectSlug>` to authorize another repair run against the same approved
-         architecture and latest SourceZip. On that exact continuation, load this skill, read the latest
-         SourceZip and BuildReport, and continue targeted repair without rendering a new architecture or
-         asking for `APPROVE ARCHITECTURE` again. A feature, requirement, API, data-model, identity, or
-         topology change still requires a revised architecture and fresh architecture approval.
-    - A successful build returns desktop and mobile UI screenshot artifacts captured from Vite preview
-       inside E2B. Inspect both screenshots before presenting them. If either looks like an unstyled
-       browser-default form, omits an approved primary workflow, has excessive empty space, weak
-       hierarchy, overlap, clipping, or unusable mobile composition, improve the frontend and rerun the
-       pipeline instead of asking for approval. Once acceptable, show both screenshots, summarize visible
-       behavior, and ask for corrections or the exact phrase `APPROVE UI`. End the turn without calling
-       `preview_azure_project`.
-    - If the user requests UI changes, update source, rerun the complete build/test/screenshot pipeline,
-       show the new screenshots, and wait for a fresh exact `APPROVE UI` message.
-    - The latest approved architecture remains the implementation contract across later turns. Styling,
-       copy, accessibility, test, and bug-fix changes that preserve requirements, API contracts, data
-       models, identity boundaries, Azure resources, and topology may update the latest SourceZip
-       directly without rendering or approving the same architecture again. After any source change,
-       rerun the complete pipeline and require a fresh `APPROVE UI` before Azure preview.
-    - If a requested change affects requirements, observable workflows, API contracts, durable data
-       models, identity/authorization boundaries, Azure resources, or topology, render the revised
-       architecture and require a fresh `APPROVE ARCHITECTURE` before editing source.
+   - **Mandatory pre-build code review:** Before the first build and after each repair revision, read the
+      actual latest SourceZip. Check API contracts, entry-point types, DI/environment selection, auth,
+      persistence, package references, test assertions/selectors, and styling together. Record inspected
+      paths and concrete findings; fix blockers and proceed to build. This is not another user approval gate.
+   - Call `build_test_project` for the complete restore/build, backend tests, Vitest/build, Playwright,
+      screenshot, and publish pipeline. A source update or partial stage success is not a successful build.
+   - Classify the latest BuildReport by failed stage and failure signature. Use `query` to locate unknown
+      symbols or one `paths` call to read implicated product/test files together. Apply one targeted source
+      revision and rebuild; never delete, skip, or weaken a valid test merely to pass.
+   - Missing test DLLs are a testhost dependency-resolution failure. Compare the test .csproj and API
+      reference with the template: Microsoft.NET.Test.Sdk 17.11.1, xunit 2.9.2, xunit.runner.visualstudio 2.8.2,
+      and Microsoft.AspNetCore.Mvc.Testing for HTTP tests. Restore missing references before investigating
+      runtime assets. Do not edit generated .deps.json or pin an arbitrary Azure.Core version.
+   - Cosmos/Newtonsoft load failures require the explicit Newtonsoft.Json 13.0.4 PackageReference,
+      not AzureCosmosDisableNewtonsoftJsonCheck=true, dummy endpoints, or a new sandbox image. SDK errors
+      may suggest bypassing the check; do not follow that suggestion. Test client construction offline.
+   - CredentialUnavailableException in sandbox means inspect the Development dependency branch first;
+      preserve Production clients and persistence. HTTP 500 alone does not prove a provider outage.
+   - Continue while errors/stages show progress; there is no fixed three-cycle limit. Stop after the same
+      failure signature in two consecutive builds despite relevant repairs, no safe repair, or server budget
+      exhaustion. Report the real blocker and offer `CONTINUE REPAIR <projectSlug>` for a new repair run.
+      Resume from the latest SourceZip and report, not an assistant's historical success claim.
+   - On genuine success, follow UI evidence review and the approval handoff. Any subsequent source change
+      invalidates earlier packages/screenshots and requires a full rebuild and fresh `APPROVE UI`.
 7. **Infrastructure preview**
-    - `preview_azure_project` is server-gated and fails unless the latest user message after the matching
-       successful build with two screenshots is exactly `APPROVE UI`.
-   - Call `preview_azure_project` only after `build_test_project` succeeds.
-      - The single subscription-scope ARM what-if includes the Generated Resource Group and project
-         resources, plus Plan creation/update only when no existing Plan ID is configured. Explain which
-         Plan mode is selected and that an existing Plan remains unchanged. Do not create foundation
-         resources before user deployment approval.
-   - Pass the `backendPackageFileId` and `frontendPackageFileId` returned by that successful build.
-   - Summarize ARM what-if and ask the user to send the exact returned `DEPLOY <projectSlug>` phrase.
+   - After matching successful build/screenshots and exact `APPROVE UI`, call `preview_azure_project`
+     with that build's backendPackageFileId and frontendPackageFileId. What-if includes RG/project
+     resources and Plan creation/update only in default mode; explain the selected mode and changes.
+     Do not create foundation resources before deployment approval. Follow the approval handoff table.
 8. **Infrastructure deployment**
-   - Never deploy in the same user turn as preview.
-   - Call `deploy_azure_project` only after the subsequent exact approval phrase.
-    - Formal deployment runs the same fixed orchestration template in Incremental mode: create/update
-      Generated RG, create/update the shared Windows B1 Plan only in default mode, then create/update the
-       approved project resources. Existing Plan mode skips the foundation module entirely. A changed
-       Plan ID or operating system invalidates the deployment fingerprint and requires a new preview.
+   - Never deploy in the same user turn as preview. Call `deploy_azure_project` only after the subsequent
+     exact DEPLOY approval. The fixed template uses Incremental mode; existing Plan mode skips the foundation module entirely.
+     Target or package changes invalidate the fingerprint and require a new preview and approval.
 9. **Code publication and cloud E2E**
    - Publish only the tested immutable artifacts.
    - Deployment replaces only the tested frontend package's runtime-config.js placeholder with the
      trusted ARM `appUrl`; never modify generated source or rebuild after infrastructure deployment.
-   - Run health checks and cloud E2E before reporting success.
-   - Automatic rollback is not implemented, including when an existing Plan supports slots. On publication or health
-       verification failure, stop, report the failed stage, and preserve the previous deployment record
-       and package artifacts for an explicitly approved recovery deployment.
+    - Report the tool's publication and health/readiness probe results. Full cloud E2E is not available;
+       report it separately as `not available`, never as passed.
+    - No automatic rollback: on publication/probe failure, report the stage and preserve prior deployment
+       records/packages for explicitly approved recovery, even if the Plan supports slots.
 10. **Resource inspection**
    - Use `list_azure_project_resources` to inspect supported resources in the profile Generated RG.
    - Use `get_azure_project_resource` only with an id returned by the list tool.
@@ -322,30 +223,19 @@ Execute stages in order. Never report a later stage as complete unless its tool 
 
 ## Existing project iteration
 
-- A deployed project can continue to evolve in the same conversation thread. Treat a request to fix,
-   change, or add a feature as a new controlled revision, not as a new unrelated project.
-- Call `list_my_files` and select the newest `SourceZip` whose filename matches `<projectSlug>-source.zip`.
-   Use its id with `read_project_workspace`; never reconstruct deployed source from generated packages.
-- Convert the requested delta into updated acceptance criteria and render a revised Mermaid architecture
-   that includes both retained behavior and the proposed change. Wait for a new exact
-   `APPROVE ARCHITECTURE`; `update_project_workspace` is server-gated by this approval.
-- Update only the latest source revision, then rerun the complete backend unit/integration, frontend
-   Vitest/build, Playwright E2E, publish, and desktop/mobile screenshot pipeline. Never reuse an old
-   package or screenshot after source changes.
-- Wait for a fresh exact `APPROVE UI`, run a new ARM what-if, and request a new exact
-   `DEPLOY <projectSlug>`. Reusing the same slug updates deterministic resources in Incremental mode and
-   publishes the new tested artifacts; package hashes create a new deployment fingerprint.
-- Iteration is currently thread-scoped. A different conversation cannot access the original SourceZip.
-   Do not claim cross-thread project recovery until a long-lived Project/Revision repository exists.
+- Continue the same project: use `list_my_files` to find the newest `<projectSlug>-source.zip`, then
+  `read_project_workspace`. Never reconstruct source from published packages.
+- Styling, copy, accessibility, tests, and bug fixes within the approved architecture do not require
+   another architecture approval. Changes to requirements, workflows, API/data contracts, identity,
+   resources, or topology require a revised Mermaid proposal and fresh `APPROVE ARCHITECTURE` first.
+- Rebuild the latest revision completely, then obtain fresh UI/preview/DEPLOY approvals. Same-slug
+  updates reuse deterministic resources; changed packages produce a new deployment fingerprint.
+- Iteration is thread-scoped; do not claim recovery of another conversation's source.
 
 ## Tool availability rule
 
-A workflow stage may execute only when the corresponding server tool is visible and succeeds.
-
-The current server release exposes immutable source workspace tools, isolated E2B build/test execution,
-and Azure preview/deployment tools. Full cloud E2E and automatic rollback are not implemented yet.
-Never ask the user to build or upload deployment ZIP files: generate source with the workspace tools
-and obtain both packages from `build_test_project`. Never simulate build, test, or deployment results.
+Execute only available tools; report unavailable capabilities explicitly. Obtain both deployment ZIPs
+from `build_test_project`, never ask users to build/upload them. Never simulate build/test/deployment results.
 
 ## Security invariants
 

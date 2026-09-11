@@ -10,6 +10,46 @@ namespace MnaiWork.Api.Tests;
 public sealed class SoftwareFactoryApprovalTests
 {
     [Theory]
+    [InlineData("继续")]
+    [InlineData("继续修复")]
+    [InlineData("continue")]
+    [InlineData("CONTINUE REPAIR textblog")]
+    public void RepairContinuation_RestoresLatestFailureAndSource(string command)
+    {
+        var source = Message(MessageRole.Tool, 1, "source");
+        source.Artifacts.Add(new Artifact { Id = "source-1", Kind = ArtifactKind.SourceZip, FileName = "textblog-source.zip" });
+        var build = Message(MessageRole.Tool, 2, "CS0246 IConfiguration");
+        build.ToolName = "build_test_project";
+        build.ToolSucceeded = false;
+        build.Artifacts.Add(new Artifact { Id = "report-1", Kind = ArtifactKind.BuildReport, FileName = "textblog-build-report.txt" });
+        var history = new[] { source, build, Message(MessageRole.User, 3, command) };
+        var prompt = AgentRunWorkflow.BuildRepairContinuationPrompt(history);
+        Assert.NotNull(prompt);
+        Assert.Contains("sourceArchiveFileId=source-1", prompt);
+        Assert.Contains("CS0246 IConfiguration", prompt);
+        build.ToolSucceeded = true;
+        Assert.Null(AgentRunWorkflow.BuildRepairContinuationPrompt(history));
+    }
+
+    [Fact]
+    public void RepairContinuation_DoesNotResumeAnOlderFailureAfterSuccess()
+    {
+        var source = Message(MessageRole.Tool, 1, "source");
+        source.Artifacts.Add(new Artifact { Kind = ArtifactKind.SourceZip, FileName = "textblog-source.zip" });
+        var failed = Message(MessageRole.Tool, 2, "failed");
+        failed.ToolName = "build_test_project";
+        failed.Artifacts.Add(new Artifact { Kind = ArtifactKind.BuildReport, FileName = "textblog-build-report.txt" });
+        var passed = Message(MessageRole.Tool, 3, "passed");
+        passed.ToolName = "build_test_project";
+        passed.ToolSucceeded = true;
+        passed.Artifacts.Add(new Artifact { Kind = ArtifactKind.BuildReport, FileName = "textblog-build-report.txt" });
+        Assert.Null(AgentRunWorkflow.BuildRepairContinuationPrompt(new[]
+        {
+            source, failed, passed, Message(MessageRole.User, 4, "CONTINUE REPAIR textblog")
+        }));
+    }
+
+    [Theory]
     [InlineData("DEPLOY demo-one", "demo-one")]
     [InlineData(" DEPLOY demo-one ", "demo-one")]
     [InlineData("deploy demo-one", null)]
@@ -358,19 +398,20 @@ public sealed class SoftwareFactoryApprovalTests
         var skill = new SoftwareFactorySkill();
         var instructions = skill.LoadInstructions();
 
-        Assert.Equal("1.2.7", skill.Version);
+        Assert.Equal("1.4.0", skill.Version);
+        Assert.InRange(instructions.Length, 1, 22_000);
         Assert.Contains("explicit Newtonsoft.Json 13.0.4 PackageReference", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("do not follow that suggestion", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("Mandatory pre-build code review", instructions, StringComparison.Ordinal);
-        Assert.Contains("read the actual latest SourceZip", instructions, StringComparison.Ordinal);
-        Assert.Contains("repair revision, read the actual latest SourceZip", instructions, StringComparison.Ordinal);
+        Assert.Contains("actual latest SourceZip", instructions, StringComparison.Ordinal);
+        Assert.Contains("Before the first build and after each repair revision", instructions, StringComparison.Ordinal);
         Assert.Contains("not another user approval gate", instructions, StringComparison.Ordinal);
         Assert.Contains("testhost dependency-resolution failure", instructions, StringComparison.Ordinal);
-        Assert.Contains("If Microsoft.NET.Test.Sdk is missing, restore its template", instructions, StringComparison.Ordinal);
-        Assert.Contains("xunit.runner.visualstudio is an adapter", instructions, StringComparison.Ordinal);
-        Assert.Contains("not product coverage", instructions, StringComparison.Ordinal);
-        Assert.Contains("repairable generated source, not E2B initialization failure", instructions, StringComparison.Ordinal);
-        Assert.Contains("without real Azure", instructions, StringComparison.Ordinal);
+        Assert.Contains("Restore missing references before investigating", instructions, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.NET.Test.Sdk 17.11.1", instructions, StringComparison.Ordinal);
+        Assert.Contains("xunit.runner.visualstudio 2.8.2", instructions, StringComparison.Ordinal);
+        Assert.Contains("never delete, skip, or weaken a valid test", instructions, StringComparison.Ordinal);
+        Assert.Contains("HTTP 500 alone does not prove a provider outage", instructions, StringComparison.Ordinal);
         Assert.Contains("pin an arbitrary Azure.Core version", instructions, StringComparison.Ordinal);
         Assert.Contains("Before the first build and after each repair revision", SystemPrompts.Agent, StringComparison.Ordinal);
         Assert.Contains("code review checklist on actual source", SystemPrompts.Agent, StringComparison.Ordinal);
@@ -388,6 +429,47 @@ public sealed class SoftwareFactoryApprovalTests
     }
 
     [Fact]
+    public void ProjectTemplate_EmbedsEnvironmentAdaptersAndRootAcceptanceContract()
+    {
+        var assembly = typeof(CreateProjectWorkspaceTool).Assembly;
+        foreach (var path in new[] { "src/backend/DependencyChecks.cs", "src/backend/NoteRepositories.cs",
+                     "src/backend/FileStores.cs", "src/backend/SecretProviders.cs", "src/frontend/acceptance.json" })
+        {
+            using var stream = assembly.GetManifestResourceStream("MnaiWork.Api.Agent.ProjectTemplate/" + path);
+            Assert.NotNull(stream);
+        }
+        var instructions = new SoftwareFactorySkill().LoadInstructions();
+        Assert.Contains("builder.Environment.IsDevelopment()", instructions);
+        Assert.Contains("substitute only external I/O dependencies", instructions);
+        Assert.Contains("never register an in-memory repository unconditionally", instructions);
+        Assert.Contains("missing Production configuration fails", instructions);
+        Assert.Contains("not under public/", instructions);
+    }
+
+    [Fact]
+    public void SoftwareFactorySkill_RequiresPremiumVisualFinishForSimplePages()
+    {
+        var instructions = new SoftwareFactorySkill().LoadInstructions();
+
+        Assert.Contains("Premium frontend quality, even for simple pages", instructions, StringComparison.Ordinal);
+        Assert.Contains("Let content determine section height", instructions, StringComparison.Ordinal);
+        Assert.Contains("does not require dark mode", instructions, StringComparison.Ordinal);
+        Assert.Contains("respect reduced motion", instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not invent features, fake activity", instructions, StringComparison.Ordinal);
+        Assert.Contains("visual finish separately from functional correctness", instructions, StringComparison.Ordinal);
+        Assert.Contains("final visual approval rather than claiming an automated aesthetic score", instructions, StringComparison.Ordinal);
+        Assert.True(instructions.IndexOf("## UI Quality Contract", StringComparison.Ordinal)
+            < instructions.IndexOf("## Supported target", StringComparison.Ordinal));
+        Assert.Contains("### 1. Choose a visual direction", instructions);
+        Assert.Contains("### 2. Implement the design, not just markup", instructions);
+        Assert.Contains("### 3. Review evidence before handoff", instructions);
+        Assert.Contains("Screenshot IDs are not image inputs", instructions);
+        Assert.Contains("visual review is unverified", instructions);
+        Assert.Contains("React entry imports the stylesheet", instructions);
+        Assert.Contains("Preserve styling during repairs", instructions);
+    }
+
+    [Fact]
     public void SoftwareFactorySkill_RequiresExplicitDeploymentApprovalHandoff()
     {
         var instructions = new SoftwareFactorySkill().LoadInstructions();
@@ -401,7 +483,8 @@ public sealed class SoftwareFactoryApprovalTests
         Assert.Contains("explicitly asks for `APPROVE UI`, not merely mentions it", instructions, StringComparison.Ordinal);
         Assert.Contains("exact returned `DEPLOY <projectSlug>` phrase", instructions, StringComparison.Ordinal);
         Assert.Contains("If preview fails, report the blocker", instructions, StringComparison.Ordinal);
-        Assert.Contains("health checks, and cloud E2E succeed", instructions, StringComparison.Ordinal);
+        Assert.Contains("Full cloud E2E is not implemented", instructions, StringComparison.Ordinal);
+        Assert.Contains("never claim it passed", instructions, StringComparison.Ordinal);
         Assert.Contains("distinguish the previous live version from this new revision", instructions, StringComparison.Ordinal);
     }
 
@@ -439,11 +522,19 @@ public sealed class SoftwareFactoryApprovalTests
         Assert.Contains("In-memory repositories", instructions, StringComparison.Ordinal);
         Assert.Contains("Never call", instructions, StringComparison.Ordinal);
         Assert.Contains("AddDefaultServices", instructions, StringComparison.Ordinal);
-        Assert.Contains("There is no fixed three-cycle limit", instructions, StringComparison.Ordinal);
+        Assert.Contains("there is no fixed three-cycle limit", instructions, StringComparison.Ordinal);
         Assert.Contains("failure signature", instructions, StringComparison.Ordinal);
         Assert.DoesNotContain("Stop after three repair cycles", instructions, StringComparison.Ordinal);
         Assert.Contains("browser-default form", instructions, StringComparison.Ordinal);
         Assert.Contains("actual primary workflow", instructions, StringComparison.Ordinal);
+        Assert.Contains("src/frontend/acceptance.json", instructions, StringComparison.Ordinal);
+        Assert.Contains("worker owns and executes", instructions, StringComparison.Ordinal);
+        Assert.Contains("{{unique}}", instructions, StringComparison.Ordinal);
+        Assert.Contains("read-only applications", instructions, StringComparison.Ordinal);
+        Assert.Contains("offline serialization contract tests", instructions, StringComparison.Ordinal);
+        Assert.Contains("/partitionKey", instructions, StringComparison.Ordinal);
+        Assert.Contains("Production identity and authorization", instructions, StringComparison.Ordinal);
+        Assert.Contains("without calling it is not an assertion", instructions, StringComparison.Ordinal);
         Assert.Contains("horizontal overflow", instructions, StringComparison.Ordinal);
         Assert.Contains("Inspect both screenshots", instructions, StringComparison.Ordinal);
         Assert.Contains("template tests as placeholders", instructions, StringComparison.Ordinal);

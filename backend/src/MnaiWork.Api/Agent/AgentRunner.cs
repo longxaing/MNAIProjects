@@ -119,6 +119,12 @@ public sealed class AgentRunner
                 ? SystemPrompts.Agent
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
             instructions = $"{instructions}\n\n{_skills.BuildCatalogPrompt()}";
+            var persistedBuildBlocker = BuildEvidence.GetBlockingReply(history);
+            if (persistedBuildBlocker is not null)
+            {
+                instructions += "\n\nSERVER BUILD EVIDENCE (authoritative; overrides assistant summaries):\n"
+                    + persistedBuildBlocker;
+            }
             var deploymentContinuation = AgentRunWorkflow.BuildDeploymentContinuationPrompt(history);
             if (deploymentContinuation is not null)
             {
@@ -131,7 +137,9 @@ public sealed class AgentRunner
             }
 
             var reachedFinalResponse = false;
-            var repairRequired = false;
+            var repairRequired = repairContinuation is not null;
+            var buildWorkflowActive = repairRequired || BuildEvidence.IsContinuation(history);
+            string? blockedBuildReply = null;
             string? previousFailureSignature = null;
             var repeatedFailureCount = 0;
             for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
@@ -171,6 +179,9 @@ public sealed class AgentRunner
                 var text = new StringBuilder();
                 ResponseResult? final = null;
                 var lastPersistedLength = 0;
+                var bufferBuildReply = buildWorkflowActive
+                    || history.Any(message => message.Role == MessageRole.Tool && message.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.SourceZip))
+                    || _skills.IsToolAvailable(runId, "build_test_project");
 
                 await foreach (var update in _client.CreateResponseStreamingAsync(options, ct))
                 {
@@ -178,8 +189,9 @@ public sealed class AgentRunner
                     {
                         case StreamingResponseOutputTextDeltaUpdate delta:
                             text.Append(delta.Delta);
-                            Emit(new AgentEvent { Type = "delta", MessageId = assistant.Id, Delta = delta.Delta });
-                            if (text.Length - lastPersistedLength >= 400)
+                            if (!bufferBuildReply)
+                                Emit(new AgentEvent { Type = "delta", MessageId = assistant.Id, Delta = delta.Delta });
+                            if (!bufferBuildReply && text.Length - lastPersistedLength >= 400)
                             {
                                 assistant.Content = text.ToString();
                                 await _messages.UpsertAsync(assistant, ct);
@@ -194,26 +206,36 @@ public sealed class AgentRunner
                 }
 
                 var assistantText = text.Length > 0 ? text.ToString() : (final?.GetOutputText() ?? string.Empty);
-                assistant.Content = assistantText;
-                assistant.Streaming = false;
-                await _messages.UpsertAsync(assistant, ct);
-                Emit(new AgentEvent { Type = "message_done", MessageId = assistant.Id, Content = assistantText });
-
                 var calls = new List<FunctionCallResponseItem>();
                 if (final is not null)
                 {
                     foreach (var item in final.OutputItems)
                     {
-                        input.Add(item); // carry the assistant message + any tool calls into the next turn
                         if (item is FunctionCallResponseItem call)
                         {
                             calls.Add(call);
                         }
                     }
                 }
-                else if (!string.IsNullOrWhiteSpace(assistantText))
+                if (calls.Any(call => call.FunctionName is "create_project_workspace" or "update_project_workspace" or "build_test_project"))
+                    buildWorkflowActive = true;
+                blockedBuildReply = buildWorkflowActive
+                    ? BuildEvidence.GetBlockingReply(await _messages.ListAsync(threadId, ct)) : null;
+                if (blockedBuildReply is not null)
                 {
-                    input.Add(ResponseItem.CreateAssistantMessageItem(assistantText));
+                    var continuingRepair = repairRequired && iteration + 1 < _options.MaxToolIterations;
+                    assistantText = calls.Count == 0 && !continuingRepair ? blockedBuildReply : string.Empty;
+                }
+                assistant.Content = assistantText;
+                assistant.Streaming = false;
+                await _messages.UpsertAsync(assistant, ct);
+                Emit(new AgentEvent { Type = "message_done", MessageId = assistant.Id, Content = assistantText });
+                if (final is not null && blockedBuildReply is null)
+                    input.AddRange(final.OutputItems);
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(assistantText)) input.Add(ResponseItem.CreateAssistantMessageItem(assistantText));
+                    if (final is not null) input.AddRange(final.OutputItems.Where(item => item is not MessageResponseItem));
                 }
 
                 if (calls.Count == 0)
@@ -277,9 +299,10 @@ public sealed class AgentRunner
                     "before producing a final response.");
             }
 
-            run.Status = RunStatus.Completed;
+            run.Status = blockedBuildReply is null ? RunStatus.Completed : RunStatus.Failed;
+            run.Error = blockedBuildReply;
             await _runs.UpsertAsync(run, ct);
-            Emit(new AgentEvent { Type = "run", Status = "completed" });
+            Emit(new AgentEvent { Type = "run", Status = blockedBuildReply is null ? "completed" : "failed", Error = run.Error });
         }
         catch (OperationCanceledException)
         {
@@ -345,7 +368,7 @@ public sealed class AgentRunner
             RunId = runId,
             Role = MessageRole.Tool,
             ToolName = toolName,
-            ToolArguments = toolName is "preview_azure_project" or "deploy_azure_project" ? args?.Clone() : null,
+            ToolArguments = toolName is "preview_azure_project" or "deploy_azure_project" or "build_test_project" ? args?.Clone() : null,
             ToolSucceeded = result.Success,
             Content = result.Output,
             Sequence = sequence
@@ -455,23 +478,41 @@ internal static class AgentRunWorkflow
     {
         var latestUser = history.LastOrDefault(message => message.Role == MessageRole.User);
         const string prefix = "CONTINUE REPAIR ";
-        if (latestUser is null
-            || !latestUser.Content.StartsWith(prefix, StringComparison.Ordinal)
-            || !CreateProjectWorkspaceTool.IsValidSlug(latestUser.Content[prefix.Length..].Trim()))
+        if (latestUser is null)
         {
             return null;
         }
 
-        var projectSlug = latestUser.Content[prefix.Length..].Trim();
+        var content = latestUser.Content.Trim();
+        string? projectSlug = null;
+        if (content.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            projectSlug = content[prefix.Length..].Trim();
+        }
+        else if (content is "继续" or "继续修复" or "continue" or "Continue")
+        {
+            var latestBuild = history.LastOrDefault(message => message.Role == MessageRole.Tool
+                && message.ToolName == "build_test_project" && message.Sequence < latestUser.Sequence);
+            var latestReport = latestBuild?.Artifacts.LastOrDefault(artifact => artifact.Kind == ArtifactKind.BuildReport);
+            const string reportSuffix = "-build-report.txt";
+            if (latestReport?.FileName.EndsWith(reportSuffix, StringComparison.Ordinal) == true)
+            {
+                projectSlug = latestReport.FileName[..^reportSuffix.Length];
+            }
+        }
+        if (projectSlug is null || !CreateProjectWorkspaceTool.IsValidSlug(projectSlug)) return null;
         var reportFileName = $"{projectSlug}-build-report.txt";
         var sourceFileName = $"{projectSlug}-source.zip";
         var failedBuild = history.LastOrDefault(message =>
             message.Role == MessageRole.Tool
             && string.Equals(message.ToolName, "build_test_project", StringComparison.OrdinalIgnoreCase)
-            && message.Artifacts.Any(artifact =>
+            && (message.Artifacts.Any(artifact =>
                 artifact.Kind == ArtifactKind.BuildReport
                 && string.Equals(artifact.FileName, reportFileName, StringComparison.Ordinal))
-            && !message.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.BackendPackage));
+                || (message.ToolArguments is { ValueKind: JsonValueKind.Object } arguments
+                    && arguments.TryGetProperty("projectSlug", out var slug)
+                    && slug.ValueKind == JsonValueKind.String && slug.GetString() == projectSlug))
+            && message.Sequence < latestUser.Sequence);
         var source = history
             .SelectMany(message => message.Artifacts.Select(artifact => (message.Sequence, Artifact: artifact)))
             .LastOrDefault(item =>
@@ -481,6 +522,8 @@ internal static class AgentRunWorkflow
             artifact.Kind == ArtifactKind.BuildReport
             && string.Equals(artifact.FileName, reportFileName, StringComparison.Ordinal));
         if (failedBuild is null
+            || failedBuild.ToolSucceeded == true
+            || failedBuild.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.BackendPackage)
             || report is null
             || source.Artifact is null
             || latestUser.Sequence <= failedBuild.Sequence)

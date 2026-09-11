@@ -21,10 +21,10 @@ public sealed class SoftwareFactorySkill : IAgentSkill
     public string Name => "software-factory";
 
     public string Description =>
-        "Create, test, and deploy React plus ASP.NET Core demo projects using a mandatory " +
-        "code, test, Azure what-if, approval, and deployment workflow.";
+        "Design premium, polished React interfaces with working ASP.NET Core backends using a mandatory " +
+        "UI quality, code, test, Azure what-if, approval, and deployment workflow.";
 
-    public string Version => "1.2.7";
+    public string Version => "1.4.0";
     public string Category => "engineering";
 
     public IReadOnlySet<string> ToolNames { get; } = new HashSet<string>(

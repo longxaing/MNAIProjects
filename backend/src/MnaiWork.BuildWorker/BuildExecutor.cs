@@ -175,6 +175,16 @@ public sealed class LocalBuildPipeline
                 });
             }
 
+            string primaryWorkflow;
+            try
+            {
+                primaryWorkflow = PrimaryWorkflowContract.Load(frontend);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Failed(new[] { new BuildStepResult("primary workflow configuration", false, 1, 0, ex.Message) });
+            }
+
             var steps = new List<BuildStepResult>();
             var testResults = Path.Combine(root, "TestResults");
             if (Directory.Exists(testResults))
@@ -254,9 +264,10 @@ public sealed class LocalBuildPipeline
                         return Failed(steps);
                     }
                     screenshots = await CaptureUiScreenshotsAsync(
-                        steps, frontend, root, totalTimeout.Token);
+                        steps, frontend, root, primaryWorkflow, totalTimeout.Token);
                     if (screenshots is null)
                     {
+                        AppendBackendOutput(steps, backend.Output);
                         return Failed(steps);
                     }
                 }
@@ -383,13 +394,24 @@ public sealed class LocalBuildPipeline
         ICollection<BuildStepResult> steps,
         string frontendDirectory,
         string root,
+        string primaryWorkflow,
         CancellationToken ct)
     {
         var outputDirectory = Path.Combine(root, "out", "ui");
         Directory.CreateDirectory(outputDirectory);
         var scriptPath = Path.Combine(frontendDirectory, ".mnai-capture-ui.mjs");
+        var workflowScriptPath = Path.Combine(frontendDirectory, ".mnai-primary-workflow.mjs");
+        using (var stream = typeof(LocalBuildPipeline).Assembly.GetManifestResourceStream(
+                   "MnaiWork.BuildExecution.PrimaryWorkflow.mjs")
+               ?? throw new InvalidOperationException("Primary workflow verifier resource is missing."))
+        using (var reader = new StreamReader(stream))
+        {
+            await File.WriteAllTextAsync(workflowScriptPath, await reader.ReadToEndAsync(ct), ct);
+        }
         await File.WriteAllTextAsync(scriptPath, $$"""
             import { chromium, devices } from "@playwright/test";
+            import { verifyPrimaryWorkflow } from "./.mnai-primary-workflow.mjs";
+            const contract = {{primaryWorkflow}};
 
                         const launchOptions = process.platform === "win32"
                             ? { headless: true, channel: "msedge" }
@@ -401,7 +423,7 @@ public sealed class LocalBuildPipeline
                 { name: "mobile", options: devices["iPhone 13"] },
               ];
               for (const target of targets) {
-                const context = await browser.newContext(target.options);
+                const context = await browser.newContext({ ...target.options, serviceWorkers: "block" });
                 const page = await context.newPage();
                                 const pageErrors = [];
                                 page.on("pageerror", error => pageErrors.push(error.message));
@@ -416,6 +438,7 @@ public sealed class LocalBuildPipeline
                                 if (text.length < 2 && visualElements === 0) {
                                     throw new Error(`${target.name} page rendered no meaningful UI`);
                                 }
+                await verifyPrimaryWorkflow(page, contract, target.name);
                                 if (pageErrors.length > 0) {
                                     throw new Error(`${target.name} page error: ${pageErrors.join(" | ")}`);
                 }
@@ -436,7 +459,7 @@ public sealed class LocalBuildPipeline
             await WaitForFrontendAsync(preview, ct);
             if (!await RunRequiredAsync(
                     steps,
-                    "UI screenshots",
+                    "primary workflow and UI screenshots",
                     "node",
                     new[] { scriptPath },
                     frontendDirectory,
@@ -467,6 +490,7 @@ public sealed class LocalBuildPipeline
             {
             }
             File.Delete(scriptPath);
+            File.Delete(workflowScriptPath);
         }
     }
 

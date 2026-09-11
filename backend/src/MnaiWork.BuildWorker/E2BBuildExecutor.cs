@@ -143,8 +143,27 @@ public sealed class BuildExecutor : IAsyncDisposable
         TimeSpan timeout,
         CancellationToken ct)
     {
-        await using var sandbox = await _sandboxes.CreateAsync(templateId, timeout, ct);
-        return await sandbox.BuildAsync(request, ct);
+        await using (var sandbox = await _sandboxes.CreateAsync(templateId, timeout, ct))
+        {
+            try
+            {
+                return await sandbox.BuildAsync(request, ct);
+            }
+            catch (HttpRequestException ex) when (!ct.IsCancellationRequested && CanRetryBuild(ex))
+            {
+                _logger.LogWarning(ex, "E2B build HTTP failure; recreating sandbox and retrying once.");
+            }
+        }
+        ct.ThrowIfCancellationRequested();
+        await using var replacement = await _sandboxes.CreateAsync(templateId, timeout, ct);
+        try
+        {
+            return await replacement.BuildAsync(request, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw RetryExhausted(ex);
+        }
     }
 
     private async Task<BuildProjectResponse> ExecuteInCachedSandboxAsync(
@@ -191,22 +210,31 @@ public sealed class BuildExecutor : IAsyncDisposable
                     : result.Steps.LastOrDefault(step => !step.Succeeded)?.Name;
                 return result;
             }
-            catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.NotFound
-                or System.Net.HttpStatusCode.Gone)
+            catch (HttpRequestException ex) when (!ct.IsCancellationRequested && CanRetryBuild(ex))
             {
-                _logger.LogWarning("Cached E2B sandbox expired remotely; recreating it once.");
+                _logger.LogWarning(ex, "Cached E2B build HTTP failure; recreating sandbox and retrying once.");
                 _cachedSandboxes.TryRemove(cacheKey, out _);
                 await cached.Session.DisposeAsync();
+                ct.ThrowIfCancellationRequested();
                 cached = new CachedSandbox(
                     templateId,
                     await _sandboxes.CreateAsync(templateId, sandboxLifetime, ct),
                     DateTimeOffset.UtcNow.Add(GetReuseWindow(sandboxLifetime)));
                 _cachedSandboxes[cacheKey] = cached;
-                var result = await cached.Session.BuildAsync(prioritizedRequest, ct);
-                cached.LastFailedStage = result.Succeeded
-                    ? null
-                    : result.Steps.LastOrDefault(step => !step.Succeeded)?.Name;
-                return result;
+                try
+                {
+                    var result = await cached.Session.BuildAsync(prioritizedRequest, ct);
+                    cached.LastFailedStage = result.Succeeded
+                        ? null
+                        : result.Steps.LastOrDefault(step => !step.Succeeded)?.Name;
+                    return result;
+                }
+                catch (HttpRequestException retryError)
+                {
+                    _cachedSandboxes.TryRemove(cacheKey, out _);
+                    await cached.Session.DisposeAsync();
+                    throw RetryExhausted(retryError);
+                }
             }
         }
         finally
@@ -214,6 +242,18 @@ public sealed class BuildExecutor : IAsyncDisposable
             gate.Release();
         }
     }
+
+    private static bool CanRetryBuild(HttpRequestException error) => error.StatusCode is
+        System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone
+        or System.Net.HttpStatusCode.InternalServerError or System.Net.HttpStatusCode.BadGateway
+        or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout;
+
+    private static HttpRequestException RetryExhausted(HttpRequestException error) => new(
+        "E2B build failed after one automatic retry in a new sandbox using the same source. " +
+        "HTTP status alone does not identify a provider outage or rule out a runner/source failure. " +
+        "Inspect runner logs and the response details before further retries. Last error: " + error.Message,
+        error,
+        error.StatusCode);
 
     private static TimeSpan GetReuseWindow(TimeSpan sandboxLifetime)
     {

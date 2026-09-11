@@ -8,6 +8,78 @@ namespace MnaiWork.Api.Tests;
 
 public sealed class InProcessBuildExecutionTests
 {
+    [Theory]
+    [InlineData("src/frontend/src/main.tsx", "onSubmit={saveNote}", "onSubmit={event => event.preventDefault()}", "primary workflow and UI screenshots", "waitForResponse")]
+    [InlineData("src/backend/Program.cs", "return Results.Ok(note);", "return Results.BadRequest();", "dotnet tests", "400 (Bad Request)")]
+    [InlineData("src/backend/Program.cs", "await notes.AddAsync(note, ct);", "", "dotnet tests", "test-note")]
+    public async Task ExecuteAsync_RejectsBrokenPrimaryWorkflowAtEarliestApplicableGate(
+        string path, string oldValue, string newValue, string expectedStage, string expectedError)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["BuildExecution:Enabled"] = "true", ["BuildExecution:PlaywrightVersion"] = "1.62.1"
+        }).Build();
+        var executor = new LocalBuildPipeline(configuration, NullLogger<LocalBuildPipeline>.Instance);
+        var archive = CreateSourceArchive(Path.Combine(FindBackendRoot(), "tests", "BuildWorkerFixture"),
+            (path, oldValue, newValue));
+        var result = await executor.ExecuteAsync(archive, "GeneratedApp.sln", "src/backend/GeneratedApp.Api.csproj",
+            "src/frontend", CancellationToken.None);
+        Assert.False(result.Succeeded);
+        if (expectedStage == "primary workflow and UI screenshots")
+            Assert.Contains(result.Steps, step => step.Name == "Playwright E2E" && step.Succeeded);
+        var failed = Assert.Single(result.Steps, step => !step.Succeeded);
+        Assert.Equal(expectedStage, failed.Name);
+        Assert.Contains(expectedError, failed.Output);
+        Assert.Null(result.BackendPackageBase64);
+        Assert.Null(result.FrontendPackageBase64);
+        Assert.Null(result.DesktopScreenshotBase64);
+        Assert.Null(result.MobileScreenshotBase64);
+    }
+
+    [Theory]
+    [InlineData("\"version\": 1", "\"version\": 1.5")]
+    [InlineData("\"version\": 1", "\"version\": 2")]
+    [InlineData("{{unique}}", "constant fixture data")]
+    [InlineData("/api/fixture-notes", "/health")]
+    [InlineData("\"POST\"", "\"GET\"")]
+    [InlineData("\"fields\"", "\"missingFields\"")]
+    public async Task ExecuteAsync_ReportsMalformedPrimaryWorkflowAsRepairableFailure(string oldValue, string newValue)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["BuildExecution:Enabled"] = "true", ["BuildExecution:PlaywrightVersion"] = "1.62.1"
+        }).Build();
+        var executor = new LocalBuildPipeline(configuration, NullLogger<LocalBuildPipeline>.Instance);
+        var archive = CreateSourceArchive(Path.Combine(FindBackendRoot(), "tests", "BuildWorkerFixture"),
+            ("src/frontend/acceptance.json", oldValue, newValue));
+        var result = await executor.ExecuteAsync(archive, "GeneratedApp.sln", "src/backend/GeneratedApp.Api.csproj",
+            "src/frontend", CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal("primary workflow configuration", Assert.Single(result.Steps).Name);
+        Assert.Contains("rerun build_test_project", result.Steps[0].Output);
+        Assert.Null(result.BackendPackageBase64);
+        Assert.Null(result.FrontendPackageBase64);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RejectsMissingPrimaryWorkflowBeforeProducingPackages()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["BuildExecution:Enabled"] = "true", ["BuildExecution:PlaywrightVersion"] = "1.62.1"
+        }).Build();
+        var executor = new LocalBuildPipeline(configuration, NullLogger<LocalBuildPipeline>.Instance);
+        var archive = CreateSourceArchive(Path.Combine(FindBackendRoot(), "tests", "BuildWorkerFixture"),
+            deletedPath: "src/frontend/acceptance.json");
+        var result = await executor.ExecuteAsync(archive, "GeneratedApp.sln", "src/backend/GeneratedApp.Api.csproj",
+            "src/frontend", CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Equal("primary workflow configuration", Assert.Single(result.Steps).Name);
+        Assert.Contains("acceptance.json", result.Steps[0].Output);
+        Assert.Null(result.BackendPackageBase64);
+        Assert.Null(result.FrontendPackageBase64);
+    }
+
     private static readonly HashSet<string> ExcludedDirectories = new(
         new[]
         {
@@ -247,9 +319,9 @@ public sealed class InProcessBuildExecutionTests
         return output.ToArray();
     }
 
-    private static string FindBackendRoot()
+    private static string FindBackendRoot([System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath)!);
         while (directory is not null)
         {
             if (File.Exists(Path.Combine(directory.FullName, "MnaiWork.sln")))

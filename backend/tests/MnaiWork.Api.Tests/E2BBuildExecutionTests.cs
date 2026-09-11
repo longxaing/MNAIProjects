@@ -10,6 +10,61 @@ namespace MnaiWork.Api.Tests;
 
 public sealed class E2BBuildExecutionTests
 {
+    [Theory]
+    [InlineData(null, HttpStatusCode.InternalServerError)]
+    [InlineData("project", HttpStatusCode.InternalServerError)]
+    [InlineData("project", HttpStatusCode.BadGateway)]
+    [InlineData("project", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("project", HttpStatusCode.GatewayTimeout)]
+    [InlineData("project", HttpStatusCode.NotFound)]
+    [InlineData("project", HttpStatusCode.Gone)]
+    public async Task BuildExecutor_RetriesHttpFailureInFreshSandbox(string? cacheKey, HttpStatusCode status)
+    {
+        var client = new FakeSandboxClient(SuccessfulResponse());
+        client.BuildErrors.Enqueue(new HttpRequestException("runner unavailable", null, status));
+        await using var executor = new BuildExecutor(BuildConfiguration(), client, NullLogger<BuildExecutor>.Instance);
+        var result = await executor.ExecuteAsync(new byte[] { 1 }, "app.sln", "api.csproj", "frontend",
+            CancellationToken.None, cacheKey);
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, client.CreateCount);
+        Assert.True(client.Sessions[0].Disposed);
+        Assert.Equal(client.Sessions[0].Request, client.Sessions[1].Request);
+        Assert.All(client.Sessions, session => Assert.Equal(1, session.BuildCount));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("project")]
+    public async Task BuildExecutor_StopsAfterOneRetryAndPreservesError(string? cacheKey)
+    {
+        var client = new FakeSandboxClient(SuccessfulResponse());
+        client.BuildErrors.Enqueue(new HttpRequestException("first", null, HttpStatusCode.InternalServerError));
+        client.BuildErrors.Enqueue(new HttpRequestException("second diagnostic", null, HttpStatusCode.InternalServerError));
+        await using var executor = new BuildExecutor(BuildConfiguration(), client, NullLogger<BuildExecutor>.Instance);
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => executor.ExecuteAsync(
+            new byte[] { 1 }, "app.sln", "api.csproj", "frontend", CancellationToken.None, cacheKey));
+        Assert.Equal(2, client.CreateCount);
+        Assert.All(client.Sessions, session => Assert.True(session.Disposed));
+        Assert.Contains("one automatic retry", error.Message);
+        Assert.Contains("second diagnostic", error.Message);
+        Assert.Equal(HttpStatusCode.InternalServerError, error.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task BuildExecutor_DoesNotRetryNonTransientHttpFailure(HttpStatusCode status)
+    {
+        var client = new FakeSandboxClient(SuccessfulResponse());
+        client.BuildErrors.Enqueue(new HttpRequestException("invalid request or credentials", null, status));
+        await using var executor = new BuildExecutor(BuildConfiguration(), client, NullLogger<BuildExecutor>.Instance);
+        await Assert.ThrowsAsync<HttpRequestException>(() => executor.ExecuteAsync(
+            new byte[] { 1 }, "app.sln", "api.csproj", "frontend", CancellationToken.None, "project"));
+        Assert.Equal(1, client.CreateCount);
+        Assert.Equal(1, client.Session.BuildCount);
+    }
+
     [Fact]
     public async Task BuildExecutor_DelegatesConfiguredBuildAndDisposesSandbox()
     {
@@ -233,6 +288,7 @@ public sealed class E2BBuildExecutionTests
         public TimeSpan Timeout { get; private set; }
         public int CreateCount { get; private set; }
         public List<FakeSession> Sessions { get; } = new();
+        public Queue<HttpRequestException> BuildErrors { get; } = new();
         public FakeSession Session => Sessions[0];
 
         public Task<IE2BSandboxSession> CreateAsync(
@@ -243,7 +299,10 @@ public sealed class E2BBuildExecutionTests
             CreateCount++;
             TemplateId = templateId;
             Timeout = timeout;
-            var session = new FakeSession(_response);
+            var session = new FakeSession(_response)
+            {
+                BuildError = BuildErrors.TryDequeue(out var error) ? error : null
+            };
             Sessions.Add(session);
             return Task.FromResult<IE2BSandboxSession>(session);
         }
@@ -258,12 +317,14 @@ public sealed class E2BBuildExecutionTests
         public int BuildCount { get; private set; }
         public bool Disposed { get; private set; }
         public BuildProjectResponse Response { get; set; }
+        public HttpRequestException? BuildError { get; init; }
 
         public Task<BuildProjectResponse> BuildAsync(BuildProjectRequest request, CancellationToken ct)
         {
             BuildCount++;
             Request = request;
             Requests.Add(request);
+            if (BuildError is not null) return Task.FromException<BuildProjectResponse>(BuildError);
             return Task.FromResult(Response);
         }
 
