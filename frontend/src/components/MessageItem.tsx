@@ -1,6 +1,8 @@
 import type { Message } from "../api/types";
 import { useChat } from "../store/chat";
 import ArtifactCard from "./ArtifactCard";
+import MarkdownContent from "./MarkdownContent";
+import AgentAvatar from "./AgentAvatar";
 
 function attachmentIcon(kind: string): string {
   switch (kind) {
@@ -17,16 +19,25 @@ function attachmentIcon(kind: string): string {
   }
 }
 
-export default function MessageItem({ message }: { message: Message }) {
+export default function MessageItem({
+  message,
+  latestSourceZipIds
+}: {
+  message: Message;
+  latestSourceZipIds: ReadonlySet<string>;
+}) {
   const threadId = useChat((s) => s.currentThreadId) ?? message.threadId;
+  const visibleArtifacts = message.artifacts.filter(
+    (artifact) => artifact.kind !== "sourceZip" || latestSourceZipIds.has(artifact.id)
+  );
 
   if (message.role === "tool") {
-    if (message.artifacts.length === 0) return null;
+    if (visibleArtifacts.length === 0) return null;
     return (
       <div className="row assistant">
-        <div className="avatar bot">MW</div>
+        <AgentAvatar />
         <div className="bubble tool-bubble">
-          {message.artifacts.map((a) => (
+          {visibleArtifacts.map((a) => (
             <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
           ))}
         </div>
@@ -46,17 +57,17 @@ export default function MessageItem({ message }: { message: Message }) {
     !isUser &&
     !message.streaming &&
     message.content.trim().length === 0 &&
-    message.artifacts.length === 0
+    visibleArtifacts.length === 0
   ) {
     return null;
   }
 
   return (
     <div className={`row ${isUser ? "user" : "assistant"}`}>
-      {!isUser && <div className="avatar bot">MW</div>}
+      {!isUser && <AgentAvatar />}
       <div className={`bubble ${isUser ? "user-bubble" : "assistant-bubble"}`}>
         <div className="content">
-          {message.content}
+          <MarkdownContent content={message.content} renderMermaid={!message.streaming} />
           {message.streaming && message.content.length === 0 ? (
             <span className="typing">
               <span></span>
@@ -77,7 +88,7 @@ export default function MessageItem({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        {message.artifacts.map((a) => (
+        {visibleArtifacts.map((a) => (
           <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
         ))}
       </div>

@@ -103,7 +103,7 @@ export default function Composer({
           ref={ref}
           value={value}
           rows={1}
-          placeholder="Describe the document or deck you want…"
+          placeholder="Describe your app or the change you need..."
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />

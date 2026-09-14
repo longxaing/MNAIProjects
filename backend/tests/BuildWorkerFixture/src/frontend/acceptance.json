@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "Save and reload a fixture note",
+  "fields": [{ "label": "Note", "value": "{{unique}}" }],
+  "submitButton": "Save note",
+  "mutation": { "method": "POST", "path": "/api/fixture-notes" },
+  "readPath": "/api/fixture-notes",
+  "expectedText": "{{unique}}"
+}

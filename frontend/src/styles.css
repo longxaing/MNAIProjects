@@ -22,6 +22,7 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -40,7 +41,9 @@ button {
 .app {
   display: grid;
   grid-template-columns: 288px 1fr;
-  height: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-loading {
@@ -147,6 +150,8 @@ button {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px;
   gap: 14px;
 }
@@ -181,6 +186,23 @@ button {
 .brand-name {
   font-weight: 650;
   font-size: 18px;
+}
+
+.agent-avatar {
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #153950;
+  border: 1px solid #34718b;
+}
+
+.brand { min-width: 0; }
+.brand-name { overflow-wrap: anywhere; }
+
+.agent-avatar img {
+  display: block;
+  width: 86%;
+  height: 86%;
+  object-fit: contain;
 }
 
 .new-chat {
@@ -273,7 +295,7 @@ button {
   gap: 8px;
 }
 
-.user {
+.sidebar-user {
   font-size: 13px;
   color: var(--muted);
   overflow: hidden;
@@ -300,7 +322,9 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100%;
+  min-height: 0;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -354,7 +378,9 @@ button {
 /* ---------- Messages ---------- */
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -386,7 +412,7 @@ button {
 }
 
 .avatar.bot {
-  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  background: #153950;
 }
 
 .avatar.me {
@@ -413,10 +439,47 @@ button {
 }
 
 .content {
-  white-space: pre-wrap;
   word-wrap: break-word;
   line-height: 1.55;
   font-size: 15px;
+}
+
+.content > :first-child {
+  margin-top: 0;
+}
+
+.content > :last-child {
+  margin-bottom: 0;
+}
+
+.content pre {
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-hi);
+  white-space: pre;
+}
+
+.mermaid-diagram {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-error {
+  color: #fca5a5;
 }
 
 .tool-bubble {
@@ -474,7 +537,8 @@ button {
 
 /* ---------- Artifact card ---------- */
 .artifact {
-  display: flex;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   margin-top: 10px;
@@ -482,17 +546,20 @@ button {
   background: var(--surface-hi);
   border: 1px solid var(--border);
   border-radius: 12px;
-  min-width: 280px;
+  width: min(460px, 100%);
+  min-width: 0;
 }
 
 .artifact-badge {
-  width: 42px;
+  width: 48px;
   height: 42px;
   border-radius: 9px;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
   color: white;
 }
 
@@ -502,6 +569,20 @@ button {
 
 .artifact-badge.docx {
   background: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.artifact-badge.sourceZip,
+.artifact-badge.buildReport {
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+}
+
+.artifact-badge.backendPackage,
+.artifact-badge.frontendPackage {
+  background: linear-gradient(135deg, #059669, #22c55e);
+}
+
+.artifact-badge.deploymentRecord {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
 }
 
 .artifact-meta {
@@ -534,6 +615,76 @@ button {
 .artifact-dl:hover {
   border-color: var(--brand);
   background: rgba(99, 102, 241, 0.12);
+}
+
+@media (max-width: 560px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .brand-name { font-size: 16px; }
+  .new-chat { padding: 8px; font-size: 12px; }
+  .threads { grid-column: 1 / -1; flex-direction: row; max-height: 64px; overflow-x: auto; margin: 0; padding: 0; }
+  .thread { flex: 0 0 180px; }
+  .sidebar-foot { grid-column: 1 / -1; }
+  .chat { min-width: 0; height: 100%; min-height: 0; }
+  .chat-header h2 { overflow-wrap: anywhere; }
+  .examples { grid-template-columns: minmax(0, 1fr); }
+  .empty { padding: 16px; }
+
+  .artifact {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .artifact-dl {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+.ui-screenshot {
+  width: min(760px, 100%);
+  margin: 12px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-hi);
+}
+
+.ui-screenshot img {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.ui-screenshot-loading {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--muted);
+}
+
+.ui-screenshot figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.ui-screenshot figcaption span {
+  display: grid;
+  min-width: 0;
+}
+
+.ui-screenshot figcaption strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-screenshot figcaption small {
+  color: var(--muted);
 }
 
 /* ---------- Empty state ---------- */

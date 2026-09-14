@@ -18,6 +18,8 @@ public sealed class RunsController : ControllerBase
     private readonly IAgentEventBus _bus;
     private readonly ICurrentUser _me;
 
+    internal TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
+
     public RunsController(IRunRepository runs, IAgentEventBus bus, ICurrentUser me)
     {
         _runs = runs;
@@ -43,36 +45,90 @@ public sealed class RunsController : ControllerBase
 
         // Subscribe before checking terminal state so we never miss events for an active run.
         using var subscription = _bus.Subscribe(runId);
+        run = await _runs.GetAsync(threadId, runId, ct);
+        if (run is null || run.UserId != _me.Id)
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
 
         await WriteAsync(new AgentEvent
         {
             Type = "run",
             RunId = runId,
-            Status = run.Status.ToString().ToLowerInvariant()
+            Status = run.Status.ToString().ToLowerInvariant(),
+            Error = run.Error
         }, ct);
 
-        var terminal = run.Status is RunStatus.Completed or RunStatus.Failed or RunStatus.Canceled;
-        if (terminal && !_bus.IsActive(runId))
-        {
-            await WriteAsync(new AgentEvent { Type = "done", RunId = runId }, ct);
-            return;
-        }
+        if (await WriteTerminalAsync(run, ct)) return;
 
         try
         {
-            await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+            using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var timer = new PeriodicTimer(HeartbeatInterval);
+            var available = subscription.Reader.WaitToReadAsync(waiting.Token).AsTask();
+            var heartbeat = timer.WaitForNextTickAsync(waiting.Token).AsTask();
+            try
             {
-                await WriteAsync(evt, ct);
-                if (evt.Type == "done")
+                while (true)
                 {
-                    break;
+                    await Task.WhenAny(available, heartbeat);
+                    if (heartbeat.IsCompleted)
+                    {
+                        if (!await heartbeat) return;
+                        await Response.WriteAsync(": keep-alive\n\n", ct);
+                        await Response.Body.FlushAsync(ct);
+                        var current = await _runs.GetAsync(threadId, runId, ct);
+                        if (current is null || current.UserId != _me.Id)
+                        {
+                            await WriteAsync(new AgentEvent { Type = "error", RunId = runId, Error = "Run is no longer available." }, ct);
+                            await WriteAsync(new AgentEvent { Type = "done", RunId = runId }, ct);
+                            return;
+                        }
+                        if (await WriteTerminalAsync(current, ct)) return;
+                        heartbeat = timer.WaitForNextTickAsync(waiting.Token).AsTask();
+                    }
+                    if (available.IsCompleted)
+                    {
+                        if (!await available) return;
+                        while (subscription.Reader.TryRead(out var evt))
+                        {
+                            await WriteAsync(evt, ct);
+                            if (evt.Type == "done") return;
+                        }
+                        available = subscription.Reader.WaitToReadAsync(waiting.Token).AsTask();
+                    }
                 }
+            }
+            finally
+            {
+                waiting.Cancel();
+                try { await Task.WhenAll(available, heartbeat); }
+                catch (OperationCanceledException) { }
             }
         }
         catch (OperationCanceledException)
         {
             // Client disconnected — nothing to do.
         }
+    }
+
+    private async Task<bool> WriteTerminalAsync(AgentRun run, CancellationToken ct)
+    {
+        if (run.Status is not (RunStatus.Completed or RunStatus.Failed or RunStatus.Canceled)) return false;
+        await WriteAsync(new AgentEvent
+        {
+            Type = "run", RunId = run.Id, Status = run.Status.ToString().ToLowerInvariant(), Error = run.Error
+        }, ct);
+        if (run.Status == RunStatus.Failed)
+        {
+            await WriteAsync(new AgentEvent
+            {
+                Type = "error", RunId = run.Id, Error = run.Error ?? "The agent run failed."
+            }, ct);
+        }
+        await WriteAsync(new AgentEvent { Type = "done", RunId = run.Id }, ct);
+        return true;
     }
 
     private async Task WriteAsync(AgentEvent evt, CancellationToken ct)

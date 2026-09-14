@@ -1,0 +1,19 @@
+{
+  "name": "mnaiwork-e2b-template",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "E2B template for MnaiWork generated React and ASP.NET Core projects",
+  "scripts": {
+    "login": "e2b auth login",
+    "configure": "e2b auth configure",
+    "build": "e2b template create mnaiwork-software-factory --path ../.. --dockerfile sandbox/e2bdocker/e2b.Dockerfile --cmd \"dotnet /opt/mnaiwork-runner/MnaiWork.E2BRunner.dll --urls http://0.0.0.0:3000\" --ready-cmd \"curl -fsS http://127.0.0.1:3000/health\" --cpu-count 2 --memory-mb 4096",
+    "local:up": "docker compose -f docker-compose.e2b.yml up -d --build",
+    "local:verify": "docker compose -f docker-compose.e2b.yml exec e2b-sandbox sh -lc \"verify-toolchain && curl -fsS http://127.0.0.1:3000/health\"",
+    "local:build-verify": "powershell -ExecutionPolicy Bypass -File verify-build.ps1",
+    "local:down": "docker compose -f docker-compose.e2b.yml down"
+  },
+  "devDependencies": {
+    "@e2b/cli": "^2.16.1"
+  }
+}

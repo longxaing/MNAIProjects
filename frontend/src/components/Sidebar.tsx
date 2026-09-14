@@ -1,5 +1,6 @@
 import { authEnabled, currentAccount, logout } from "../auth/auth";
 import { useChat } from "../store/chat";
+import AgentAvatar from "./AgentAvatar";
 
 export default function Sidebar() {
   const threads = useChat((s) => s.threads);
@@ -12,8 +13,8 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">MW</div>
-        <div className="brand-name">MnaiWork</div>
+        <AgentAvatar className="brand-mark" />
+        <div className="brand-name">AzurePilot</div>
       </div>
 
       <button className="new-chat" onClick={newThread}>
@@ -44,7 +45,9 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-foot">
-        <div className="user">{authEnabled ? account?.username ?? "Signed in" : "Local dev mode"}</div>
+        <div className="sidebar-user">
+          {authEnabled ? account?.username ?? "Signed in" : "Local dev mode"}
+        </div>
         {authEnabled && (
           <button className="logout" onClick={logout}>
             Sign out
