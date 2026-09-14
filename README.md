@@ -49,6 +49,14 @@ in later LLM context and acts as the implementation contract.
 
 ---
 
+## Conversation Sharing
+
+The conversation header's Share control creates a sanitized, immutable preview. Owners must review
+and confirm it before publication. The standalone read-only page uses `#/share/{threadId}` without a
+token or sign-in. Only explicitly published snapshots are available; original conversations remain
+authenticated. Revisions require a new preview. See [sharing operations](docs/conversation-sharing.md)
+for deployment prerequisites, retention, limits, and the security implications of stable thread links.
+
 ## Prerequisites
 
 - **.NET SDK 8** (`backend/global.json` pins `8.0.x`).

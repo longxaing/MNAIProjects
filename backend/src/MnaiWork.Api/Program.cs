@@ -21,6 +21,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.Identity.Web;
 using OpenAI;
 using OpenAI.Responses;
+using MnaiWork.Api.Sharing;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -130,6 +132,21 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddSingleton<DeploymentProfileService>();
 
 builder.Services.AddSingleton<IFileStorage, BlobFileStorage>();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddScoped<IShareRepository, ShareRepository>();
+builder.Services.AddSingleton<IShareBlobStore, ShareBlobStore>();
+builder.Services.AddScoped<ShareService>();
+builder.Services.AddHostedService<ShareCleanupService>();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("share-public", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("share-management", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst("oid")?.Value ?? context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddSingleton<PptxGenerator>();
 builder.Services.AddSingleton<DocxGenerator>();
 
@@ -216,6 +233,7 @@ else
 }
 builder.Services.AddAuthorization(options =>
 {
+    ShareAuthorization.Configure(options, builder.Environment.IsDevelopment() || useAzureAd);
     options.AddPolicy(
         "DeploymentProfileAdmin",
         policy => policy.RequireRole("MnaiWork.DeploymentAdmin"));
@@ -246,8 +264,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseRouting();
 app.UseCors(CorsPolicy);
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();

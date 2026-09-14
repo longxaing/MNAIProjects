@@ -1,4 +1,5 @@
 import { authEnabled, getToken } from "../auth/auth";
+import type { SharePreview, ShareListItem } from "./sharing";
 import type {
   AgentEvent,
   Attachment,
@@ -71,6 +72,23 @@ export const api = {
     }),
 
   listThreads: () => request<ThreadListItem[]>("/api/threads"),
+
+  previewShare: (threadId: string, days: number, screenshotIds: string[]) =>
+    request<SharePreview>(`/api/threads/${encodeURIComponent(threadId)}/shares/preview`, {
+      method: "POST", body: JSON.stringify({ days, screenshotIds })
+    }),
+  publishShare: (threadId: string, previewId: string) =>
+    request<{ path: string; id: string }>(`/api/threads/${encodeURIComponent(threadId)}/shares`, {
+      method: "POST", body: JSON.stringify({ previewId })
+    }),
+  listShares: (threadId: string) => request<ShareListItem[]>(`/api/threads/${encodeURIComponent(threadId)}/shares`),
+  revokeShare: (threadId: string, id: string) => request<void>(`/api/threads/${encodeURIComponent(threadId)}/shares/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  previewShareImage: async (threadId: string, previewId: string, imageId: string, signal: AbortSignal) => {
+    const response = await fetch(`${BASE}/api/threads/${encodeURIComponent(threadId)}/shares/preview/${encodeURIComponent(previewId)}/images/${encodeURIComponent(imageId)}`,
+      { headers: await buildHeaders(false), cache: "no-store", signal });
+    if (!response.ok) throw new Error("Screenshot unavailable.");
+    return response.blob();
+  },
 
   createThread: (title?: string) =>
     request<ChatThread>("/api/threads", {

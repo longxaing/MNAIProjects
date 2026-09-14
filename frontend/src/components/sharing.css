@@ -1,0 +1,64 @@
+.share-trigger, .share-icon, .share-action, .share-publish, .share-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: 6px; color: var(--ink); background: var(--surface-hi);
+  padding: 8px 12px; font: inherit; cursor: pointer;
+}
+.share-trigger { flex: 0 0 36px; width: 36px; height: 36px; padding: 0; }
+.share-icon { width: 36px; height: 36px; padding: 0; flex: 0 0 36px; }
+.share-publish { background: #165a65; border-color: #34848f; }
+.share-danger { color: #ffb7be; }
+.share-trigger:disabled, .share-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.share-dialog { width: min(920px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); padding: 0;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); overflow: auto; }
+.share-dialog::backdrop { background: rgba(0,0,0,.65); }
+.share-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 16px 20px; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 1; }
+.share-dialog h2 { font-size: 20px; margin: 0; }
+.share-dialog-body { padding: 20px; }
+.share-warning { display: flex; gap: 12px; color: #f7d9a1; background: #302b23; padding: 14px; margin-top: 0; border-left: 3px solid #bd9655; }
+.share-warning svg { flex-shrink: 0; }
+.share-muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.share-current { display: grid; gap: 10px; padding: 16px 0; border-block: 1px solid var(--border); margin-block: 18px; }
+.share-current > span { color: var(--muted); font-size: 13px; }
+.share-link-row { display: flex; gap: 8px; min-width: 0; }
+.share-link-row input { width: 100%; min-width: 0; background: var(--bg); color: var(--ink); padding: 10px; border: 1px solid var(--border); border-radius: 4px; }
+.share-options { display: flex; align-items: center; gap: 16px; margin-block: 18px; }
+.share-options select { background: var(--bg); color: var(--ink); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; font: inherit; }
+.share-screenshots { border: 0; padding: 0; margin: 16px 0; max-height: 210px; overflow: auto; }
+.share-screenshots legend { font-weight: 600; }
+.share-screenshots label, .share-confirm { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; line-height: 1.5; }
+.share-screenshots span, .share-confirm span { overflow-wrap: anywhere; min-width: 0; }
+.share-dialog input[type=checkbox] { margin-top: 5px; flex-shrink: 0; }
+.share-preview { max-height: 460px; overflow: auto; border-block: 1px solid var(--border); margin-block: 20px; padding: 16px; background: var(--bg); }
+.share-confirm { font-size: 14px; margin-bottom: 18px; }
+.share-error { color: #ffb7be; overflow-wrap: anywhere; }
+.share-notice { color: #99e2ce; }
+.shared-page { height: 100dvh; overflow: auto; background: var(--bg); color: var(--ink); }
+.shared-inner { max-width: 960px; margin: auto; padding: 28px 32px 64px; }
+.shared-brand { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 22px; }
+.shared-heading { padding: 24px 0; }
+.shared-heading h1 { font-size: 27px; line-height: 1.3; margin: 10px 0; overflow-wrap: anywhere; }
+.shared-heading p { color: var(--muted); font-size: 13px; }
+.shared-heading .shared-label { color: #89dbe0; font-weight: 600; }
+.shared-messages { display: grid; gap: 26px; }
+.shared-message { min-width: 0; padding-bottom: 24px; border-bottom: 1px solid var(--border); line-height: 1.65; overflow-wrap: anywhere; }
+.shared-message > header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
+.shared-message > header .avatar { width: 28px; height: 28px; }
+.shared-message.user { border-left: 3px solid #587ba0; padding-left: 18px; }
+.shared-message pre { max-width: 100%; overflow: auto; background: var(--surface-hi); padding: 14px; border-radius: 6px; }
+.shared-message code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.shared-message table { display: block; max-width: 100%; overflow: auto; }
+.shared-diagram { display: block; max-width: 100%; height: auto; background: white; }
+.shared-image { margin: 16px 0; }
+.shared-image img { display: block; max-width: 100%; max-height: 700px; width: auto; height: auto; margin: auto; object-fit: contain; }
+.shared-image figcaption { color: var(--muted); font-size: 12px; padding-top: 8px; }
+.shared-error { padding-top: 28px; }
+.shared-error h1 { font-size: 24px; }
+.shared-error button { background: var(--surface-hi); color: var(--ink); border: 1px solid var(--border); padding: 10px 16px; border-radius: 6px; }
+@media (max-width: 560px) {
+  .shared-inner { padding: 18px 18px 40px; }
+  .shared-heading h1 { font-size: 23px; }
+  .share-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .share-dialog-body, .share-dialog-header { padding: 14px; }
+  .share-preview { padding: 10px; }
+}
