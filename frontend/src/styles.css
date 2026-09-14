@@ -188,6 +188,23 @@ button {
   font-size: 18px;
 }
 
+.agent-avatar {
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #153950;
+  border: 1px solid #34718b;
+}
+
+.brand { min-width: 0; }
+.brand-name { overflow-wrap: anywhere; }
+
+.agent-avatar img {
+  display: block;
+  width: 86%;
+  height: 86%;
+  object-fit: contain;
+}
+
 .new-chat {
   border: 1px solid var(--border);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(34, 211, 238, 0.12));
@@ -395,7 +412,7 @@ button {
 }
 
 .avatar.bot {
-  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  background: #153950;
 }
 
 .avatar.me {
@@ -601,6 +618,18 @@ button {
 }
 
 @media (max-width: 560px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .brand-name { font-size: 16px; }
+  .new-chat { padding: 8px; font-size: 12px; }
+  .threads { grid-column: 1 / -1; flex-direction: row; max-height: 64px; overflow-x: auto; margin: 0; padding: 0; }
+  .thread { flex: 0 0 180px; }
+  .sidebar-foot { grid-column: 1 / -1; }
+  .chat { min-width: 0; height: 100%; min-height: 0; }
+  .chat-header h2 { overflow-wrap: anywhere; }
+  .examples { grid-template-columns: minmax(0, 1fr); }
+  .empty { padding: 16px; }
+
   .artifact {
     grid-template-columns: 48px minmax(0, 1fr);
   }

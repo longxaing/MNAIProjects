@@ -16,7 +16,7 @@ export default function ChatView() {
     <main className="chat">
       <header className="chat-header">
         <h2>{title}</h2>
-        <span className="tag">DOCX · PPTX</span>
+        <span className="tag">Azure</span>
       </header>
 
       {error && (

@@ -398,7 +398,7 @@ public sealed class SoftwareFactoryApprovalTests
         var skill = new SoftwareFactorySkill();
         var instructions = skill.LoadInstructions();
 
-        Assert.Equal("1.4.0", skill.Version);
+        Assert.Equal("1.4.2", skill.Version);
         Assert.InRange(instructions.Length, 1, 22_000);
         Assert.Contains("explicit Newtonsoft.Json 13.0.4 PackageReference", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("do not follow that suggestion", skill.LoadInstructions(), StringComparison.Ordinal);
@@ -433,7 +433,7 @@ public sealed class SoftwareFactoryApprovalTests
     {
         var assembly = typeof(CreateProjectWorkspaceTool).Assembly;
         foreach (var path in new[] { "src/backend/DependencyChecks.cs", "src/backend/NoteRepositories.cs",
-                     "src/backend/FileStores.cs", "src/backend/SecretProviders.cs", "src/frontend/acceptance.json" })
+                     "src/backend/FileStores.cs", "src/backend/SecretProviders.cs", "src/frontend/acceptance.json", "src/frontend/src/styles.css" })
         {
             using var stream = assembly.GetManifestResourceStream("MnaiWork.Api.Agent.ProjectTemplate/" + path);
             Assert.NotNull(stream);
@@ -467,6 +467,14 @@ public sealed class SoftwareFactoryApprovalTests
         Assert.Contains("visual review is unverified", instructions);
         Assert.Contains("React entry imports the stylesheet", instructions);
         Assert.Contains("Preserve styling during repairs", instructions);
+        Assert.Contains("actual PNGs as high-detail image inputs", instructions);
+        Assert.Contains("unstyled baseline", instructions);
+        Assert.Contains("untrusted application content", instructions);
+        Assert.Contains("When the user specifies no visual style and no existing design system applies", instructions);
+        Assert.Contains("technology-inspired UI", instructions);
+        Assert.Contains("Generate and import real product-specific CSS", instructions);
+        Assert.Contains("subtly tinted page background", instructions);
+        Assert.Contains("Explicit user styles and existing brands take priority", instructions);
     }
 
     [Fact]

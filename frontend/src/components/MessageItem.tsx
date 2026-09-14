@@ -2,6 +2,7 @@ import type { Message } from "../api/types";
 import { useChat } from "../store/chat";
 import ArtifactCard from "./ArtifactCard";
 import MarkdownContent from "./MarkdownContent";
+import AgentAvatar from "./AgentAvatar";
 
 function attachmentIcon(kind: string): string {
   switch (kind) {
@@ -34,7 +35,7 @@ export default function MessageItem({
     if (visibleArtifacts.length === 0) return null;
     return (
       <div className="row assistant">
-        <div className="avatar bot">MW</div>
+        <AgentAvatar />
         <div className="bubble tool-bubble">
           {visibleArtifacts.map((a) => (
             <ArtifactCard key={a.id} artifact={a} threadId={threadId} />
@@ -63,7 +64,7 @@ export default function MessageItem({
 
   return (
     <div className={`row ${isUser ? "user" : "assistant"}`}>
-      {!isUser && <div className="avatar bot">MW</div>}
+      {!isUser && <AgentAvatar />}
       <div className={`bubble ${isUser ? "user-bubble" : "assistant-bubble"}`}>
         <div className="content">
           <MarkdownContent content={message.content} renderMermaid={!message.streaming} />

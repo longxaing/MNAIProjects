@@ -1,0 +1,5 @@
+AzurePilot avatar: Robot (3D), Microsoft Fluent Emoji.
+Source: https://github.com/microsoft/fluentui-emoji/blob/main/assets/Robot/3D/robot_3d.png
+Copyright (c) Microsoft Corporation. Licensed under the MIT License.
+The original license is included in fluent-emoji-LICENSE.txt.
+This asset is not an official AzurePilot product mark or an endorsement by Microsoft.

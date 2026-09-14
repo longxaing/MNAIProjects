@@ -41,6 +41,9 @@
     <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\acceptance.json">
       <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/acceptance.json</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\src\frontend\src\**\*.css">
+      <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/src/frontend/src/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="..\..\tests\BuildWorkerFixture\GeneratedApp.sln">
       <LogicalName>MnaiWork.Api.Agent.ProjectTemplate/GeneratedApp.sln</LogicalName>
     </EmbeddedResource>

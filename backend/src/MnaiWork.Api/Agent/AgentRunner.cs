@@ -5,6 +5,7 @@ using MnaiWork.Api.Agent.Tools;
 using MnaiWork.Api.Configuration;
 using MnaiWork.Api.Data;
 using MnaiWork.Api.Models;
+using MnaiWork.Api.Storage;
 using Microsoft.Extensions.Options;
 using OpenAI.Responses;
 using MessageRole = MnaiWork.Api.Models.MessageRole;
@@ -27,6 +28,7 @@ public sealed class AgentRunner
     private readonly AgentSkillRegistry _skills;
     private readonly AzureOpenAiOptions _options;
     private readonly ILogger<AgentRunner> _logger;
+    private readonly IFileStorage? _storage;
 
     public AgentRunner(
         ResponsesClient client,
@@ -37,7 +39,8 @@ public sealed class AgentRunner
         ToolRegistry tools,
         AgentSkillRegistry skills,
         IOptions<AzureOpenAiOptions> options,
-        ILogger<AgentRunner> logger)
+        ILogger<AgentRunner> logger,
+        IFileStorage? storage = null)
     {
         _client = client;
         _context = context;
@@ -48,6 +51,7 @@ public sealed class AgentRunner
         _skills = skills;
         _options = options.Value;
         _logger = logger;
+        _storage = storage;
     }
 
     public async Task RunAsync(AgentRunRequest request, CancellationToken ct)
@@ -115,6 +119,19 @@ public sealed class AgentRunner
             // Keep the prompt bounded: recent turns verbatim, older turns summarized.
             var prepared = await _context.PrepareAsync(history, ct);
             var input = prepared.Items;
+            MessageResponseItem? screenshotInput = null;
+            if (_storage is not null && BuildEvidence.IsContinuation(history)
+                && BuildEvidence.GetBlockingReply(history) is null)
+            {
+                var previousBuild = history.LastOrDefault(message => message.Role == MessageRole.Tool
+                    && message.ToolName == "build_test_project" && message.ToolSucceeded == true);
+                if (previousBuild is not null)
+                {
+                    screenshotInput = await BuildScreenshotInput.CreateAsync(
+                        previousBuild.Artifacts, threadId, _messages, _storage, ct);
+                    input.Add(screenshotInput);
+                }
+            }
             var instructions = prepared.Summary is null
                 ? SystemPrompts.Agent
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
@@ -258,9 +275,26 @@ public sealed class AgentRunner
                 {
                     var result = await ExecuteToolAsync(
                         call, threadId, userId, runId, seq++, input, Emit, ct);
+                    if (result.Success && call.FunctionName is "create_project_workspace" or "update_project_workspace"
+                        && screenshotInput is not null)
+                    {
+                        input.Remove(screenshotInput);
+                        screenshotInput = null;
+                    }
                     if (string.Equals(
                             call.FunctionName, "build_test_project", StringComparison.Ordinal))
                     {
+                        if (screenshotInput is not null)
+                        {
+                            input.Remove(screenshotInput);
+                            screenshotInput = null;
+                        }
+                        if (result.Success)
+                        {
+                            screenshotInput = await BuildScreenshotInput.CreateAsync(result.Artifacts, threadId, _messages,
+                                _storage ?? throw new InvalidOperationException("Visual review unavailable: screenshot storage is not configured."), ct);
+                            input.Add(screenshotInput);
+                        }
                         repairRequired = AgentRunWorkflow.RequiresCodeRepair(result);
                         if (repairRequired)
                         {

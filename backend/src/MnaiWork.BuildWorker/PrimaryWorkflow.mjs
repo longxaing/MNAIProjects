@@ -1,6 +1,48 @@
 import { expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
+export async function verifyAppliedStyles(page, target) {
+  const evidence = await page.evaluate(async () => {
+    const viewport = document.querySelector('meta[name="viewport"]')?.content ?? '';
+    if (!/width\s*=\s*device-width/i.test(viewport)) return { error: 'Missing device-width viewport metadata' };
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = `position:fixed;left:-20000px;top:0;width:${innerWidth}px;height:${innerHeight}px;visibility:hidden`;
+    const ready = new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
+    frame.srcdoc = '<!doctype html><html><body></body></html>';
+    document.body.append(frame);
+    try {
+      await ready;
+      const baseline = frame.contentDocument;
+      const clone = document.body.cloneNode(true);
+      clone.querySelectorAll('script,style,link,iframe,img,video,audio,source,object,embed').forEach(node => node.remove());
+      for (const node of [clone, ...clone.querySelectorAll('*')]) {
+        node.removeAttribute('style');
+        for (const attribute of [...node.attributes]) if (attribute.name.startsWith('on')) node.removeAttribute(attribute.name);
+      }
+      baseline.body.replaceWith(baseline.adoptNode(clone));
+      const differences = (element, plain, properties) => properties.filter(property =>
+        getComputedStyle(element).getPropertyValue(property) !== frame.contentWindow.getComputedStyle(plain).getPropertyValue(property));
+      const layouts = ['body', 'main', 'form'];
+      const layoutChanges = layouts.flatMap(selector => {
+        const element = document.querySelector(selector), plain = baseline.querySelector(selector);
+        return element && plain ? differences(element, plain, ['display', 'padding-top', 'padding-left', 'max-width', 'background-color', 'font-family']) : [];
+      });
+      const controls = [...document.querySelectorAll('button,input,textarea,select')];
+      const plainControls = [...baseline.querySelectorAll('button,input,textarea,select')];
+      const styledControls = controls.filter((element, index) => element.getBoundingClientRect().width > 0 && plainControls[index]
+        && differences(element, plainControls[index], ['background-color', 'border-radius', 'border-top-color', 'padding-top', 'padding-left', 'min-height']).length >= 2).length;
+      return { layoutChanges: [...new Set(layoutChanges)], styledControls };
+    } finally {
+      frame.remove();
+    }
+  });
+  if (evidence.error || evidence.layoutChanges.length < 2 || evidence.styledControls < 1) {
+    throw new Error(`Applied UI styles failed (${target}): ${JSON.stringify(evidence)}. Import the product stylesheet, verify built assets and responsive viewport, and style the layout and primary controls. CSS filenames or className alone are not applied styles. This is a baseline check, not an aesthetic score.`);
+  }
+  console.log(`Applied UI styles verified (${target}): ${JSON.stringify(evidence)}`);
+}
+
 function containsValue(value, expected) {
   if (typeof value === 'string') return value.includes(expected);
   if (Array.isArray(value)) return value.some(item => containsValue(item, expected));

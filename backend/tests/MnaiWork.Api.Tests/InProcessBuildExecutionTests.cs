@@ -9,6 +9,7 @@ namespace MnaiWork.Api.Tests;
 public sealed class InProcessBuildExecutionTests
 {
     [Theory]
+    [InlineData("src/frontend/src/main.tsx", "import \"./styles.css\";", "", "primary workflow and UI screenshots", "Applied UI styles failed")]
     [InlineData("src/frontend/src/main.tsx", "onSubmit={saveNote}", "onSubmit={event => event.preventDefault()}", "primary workflow and UI screenshots", "waitForResponse")]
     [InlineData("src/backend/Program.cs", "return Results.Ok(note);", "return Results.BadRequest();", "dotnet tests", "400 (Bad Request)")]
     [InlineData("src/backend/Program.cs", "await notes.AddAsync(note, ct);", "", "dotnet tests", "test-note")]

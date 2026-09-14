@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useChat } from "../store/chat";
 import MessageItem from "./MessageItem";
+import AgentAvatar from "./AgentAvatar";
 
 const EXAMPLES = [
-  "Create a 6-slide pitch deck for a coffee subscription startup.",
-  "Write a one-page project brief for a mobile budgeting app.",
-  "Make a presentation explaining the water cycle for 5th graders.",
-  "Draft a formal quarterly business review document with a summary table."
+  "Build a text blog with a React frontend and an ASP.NET Core API on Azure.",
+  "Create a task tracker with Cosmos DB persistence.",
+  "Improve the UI of the application in this conversation.",
+  "Review the latest build failure and repair the application."
 ];
 
 export default function MessageList({ onExample }: { onExample: (text: string) => void }) {
@@ -28,11 +29,10 @@ export default function MessageList({ onExample }: { onExample: (text: string) =
   if (messages.length === 0) {
     return (
       <div className="empty">
-        <div className="empty-mark">MW</div>
-        <h1>What should we create?</h1>
+        <AgentAvatar className="empty-mark" />
+        <h1>AzurePilot</h1>
         <p>
-          Describe a document or presentation and MnaiWork will generate a polished{" "}
-          <b>.docx</b> or <b>.pptx</b> for you.
+          What are we building today?
         </p>
         <div className="examples">
           {EXAMPLES.map((e) => (
@@ -52,7 +52,7 @@ export default function MessageList({ onExample }: { onExample: (text: string) =
       ))}
       {toolActivity && (
         <div className="row assistant">
-          <div className="avatar bot">MW</div>
+          <AgentAvatar />
           <div className="bubble tool-activity">
             <span className="spinner" /> {toolActivity}
           </div>

@@ -3,6 +3,7 @@ import { api } from "./api/client";
 import { authEnabled, currentAccount, initAuth, login } from "./auth/auth";
 import ChatView from "./components/ChatView";
 import Sidebar from "./components/Sidebar";
+import AgentAvatar from "./components/AgentAvatar";
 import { useChat } from "./store/chat";
 
 /** Register/refresh the user record on the backend. Best-effort; never blocks the app. */
@@ -51,8 +52,8 @@ export default function App() {
     return (
       <div className="app-loading">
         <div className="loading-brand">
-          <div className="brand-mark big pulse">MW</div>
-          <div className="loading-title">MnaiWork</div>
+          <AgentAvatar className="brand-mark big pulse" />
+          <div className="loading-title">AzurePilot</div>
           <div className="loading-dots">
             <span></span>
             <span></span>
@@ -67,9 +68,9 @@ export default function App() {
     return (
       <div className="login-screen">
         <div className="login-card">
-          <div className="brand-mark big">MW</div>
-          <h1>MnaiWork</h1>
-          <p>Generate polished Word documents and PowerPoint decks from a chat.</p>
+          <AgentAvatar className="brand-mark big" />
+          <h1>AzurePilot</h1>
+          <p>Your Azure application workspace.</p>
           <button className="signin" onClick={() => void handleSignIn()}>
             Sign in with Microsoft
           </button>

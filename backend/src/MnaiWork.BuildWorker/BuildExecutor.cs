@@ -410,7 +410,7 @@ public sealed class LocalBuildPipeline
         }
         await File.WriteAllTextAsync(scriptPath, $$"""
             import { chromium, devices } from "@playwright/test";
-            import { verifyPrimaryWorkflow } from "./.mnai-primary-workflow.mjs";
+            import { verifyPrimaryWorkflow, verifyAppliedStyles } from "./.mnai-primary-workflow.mjs";
             const contract = {{primaryWorkflow}};
 
                         const launchOptions = process.platform === "win32"
@@ -438,7 +438,9 @@ public sealed class LocalBuildPipeline
                                 if (text.length < 2 && visualElements === 0) {
                                     throw new Error(`${target.name} page rendered no meaningful UI`);
                                 }
+                await verifyAppliedStyles(page, target.name);
                 await verifyPrimaryWorkflow(page, contract, target.name);
+                await verifyAppliedStyles(page, target.name);
                                 if (pageErrors.length > 0) {
                                     throw new Error(`${target.name} page error: ${pageErrors.join(" | ")}`);
                 }

@@ -86,6 +86,13 @@ browser gate below still requires a runner image containing that gate.
 
 ### Primary workflow gate
 
+The styled starter includes an embedded stylesheet and responsive viewport metadata. Before and after
+the primary interaction, the worker compares computed layout and control styles against an unstyled
+document at the same viewport. Missing viewport metadata or insufficient applied layout/control styling
+fails the build. This supports authored CSS, CSS-in-JS and inline styling; CSS filenames alone are not
+evidence. This conservative form-based baseline is not an aesthetic score or a complete accessibility
+review, and unusual non-form interfaces may require a future contract extension.
+
 The runner now requires `src/frontend/acceptance.json` (version 1); the checked-in fixture contains
 an example. It independently fills labelled text inputs, submits to the actual local API, navigates
 to a fresh document, and verifies the unique submitted value in both a GET JSON response and visible
@@ -102,6 +109,21 @@ The verifier is embedded in MnaiWork.BuildExecution.dll. Rebuild the E2B templat
 configured TemplateId when deploying this change; publishing only the API ZIP leaves the old sandbox
 runner unchanged. Existing sandboxes must expire or be replaced before the new gate runs. No Linux/E2B
 verification is implied by a successful local Windows test.
+
+### Model screenshot review
+
+The platform reads both PNG artifacts from the current thread after a successful build and adds their
+actual bytes to the next Responses request as high-detail image inputs. A subsequent continue/UI-approval
+turn restores images only when the current source has complete successful build evidence. Updates and
+new builds remove earlier image inputs. Missing, oversized or untrusted images fail the review path
+explicitly; no public blob URL or SAS is sent to the model. PNGs are limited to 5 MB each.
+
+Configure AzureOpenAI:Deployment with a model/deployment that supports Responses image inputs. Unsupported
+models will fail the request rather than silently falling back to text-only review. Images add token and
+request-size cost. The model must inspect and describe visible issues; image delivery is not an automated
+aesthetic approval or proof of Production behavior. This path requires the updated platform API; the new
+applied-style gate additionally requires rebuilding and switching the E2B runner template. Existing
+downloaded/source revisions are not restyled automatically.
 
 ## Sandbox verification
 
