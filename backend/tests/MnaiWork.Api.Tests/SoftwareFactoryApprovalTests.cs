@@ -10,6 +10,33 @@ namespace MnaiWork.Api.Tests;
 public sealed class SoftwareFactoryApprovalTests
 {
     [Theory]
+    [InlineData("I will prepare the diagram. APPROVE ARCHITECTURE", false, false, false, true)]
+    [InlineData("```mermaid\nflowchart LR\nA-->B\n```\nAPPROVE ARCHITECTURE", false, false, false, false)]
+    [InlineData("```mermaid\nflowchart LR\nA-->B\nAPPROVE ARCHITECTURE", false, false, false, true)]
+    [InlineData("Please send APPROVE ARCHITECTURE again", true, false, false, true)]
+    [InlineData("I will start later", true, true, false, true)]
+    [InlineData("Reading source", true, true, true, false)]
+    [InlineData("Tool failed: missing source", true, false, false, false)]
+    public void ArchitectureHandoff_RejectsPrematureAndRepeatedApproval(
+        string text, bool approved, bool awaitingImplementation, bool hasCalls, bool rejected)
+        => Assert.Equal(rejected, ArchitectureHandoff.GetCorrection(text, approved, awaitingImplementation, hasCalls) is not null);
+
+    [Fact]
+    public void ArchitectureHandoff_DoesNotTreatApprovalBeforeDiagramAsAuthorization()
+    {
+        Assert.False(ArchitectureHandoff.HasApprovedArchitecture(new[]
+        {
+            Message(MessageRole.Assistant, 1, "I will prepare a diagram. APPROVE ARCHITECTURE"),
+            Message(MessageRole.User, 2, "APPROVE ARCHITECTURE")
+        }));
+        Assert.True(ArchitectureHandoff.HasApprovedArchitecture(new[]
+        {
+            Message(MessageRole.Assistant, 1, "```mermaid\nflowchart LR\nA-->B\n```"),
+            Message(MessageRole.User, 2, "APPROVE ARCHITECTURE")
+        }));
+    }
+
+    [Theory]
     [InlineData("继续")]
     [InlineData("继续修复")]
     [InlineData("continue")]
@@ -398,11 +425,18 @@ public sealed class SoftwareFactoryApprovalTests
         var skill = new SoftwareFactorySkill();
         var instructions = skill.LoadInstructions();
 
-        Assert.Equal("1.4.2", skill.Version);
+        Assert.Equal("1.4.4", skill.Version);
+        Assert.Contains("Show the complete diagram before requesting", instructions);
+        Assert.Contains("After valid approval, call implementation tools immediately", instructions);
         Assert.InRange(instructions.Length, 1, 22_000);
         Assert.Contains("explicit Newtonsoft.Json 13.0.4 PackageReference", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("do not follow that suggestion", skill.LoadInstructions(), StringComparison.Ordinal);
         Assert.Contains("Mandatory pre-build code review", instructions, StringComparison.Ordinal);
+        Assert.Contains("reply language and website language independently", instructions);
+        Assert.Contains("new DefaultAzureCredential()", instructions);
+        Assert.Contains("GetPropertiesOfSecretsAsync", instructions);
+        Assert.Contains("no NotImplementedException", instructions);
+        Assert.Contains("do not diagnose an API-key outage", instructions);
         Assert.Contains("actual latest SourceZip", instructions, StringComparison.Ordinal);
         Assert.Contains("Before the first build and after each repair revision", instructions, StringComparison.Ordinal);
         Assert.Contains("not another user approval gate", instructions, StringComparison.Ordinal);

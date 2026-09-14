@@ -137,6 +137,72 @@ public sealed class AgentDeploymentExecutionTests
         Assert.DoesNotContain("screenshots generated", handler.LastRequest);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ArchitectureHandoff_CorrectsModelBeforePublishingApproval(bool alreadyApproved)
+    {
+        const string diagram = "```mermaid\nflowchart LR\nFE[\"Frontend\"]-->API[\"Backend\"]\n```";
+        const string premature = "I will prepare the diagram later. Reply APPROVE ARCHITECTURE.";
+        const string repeated = "Please reply APPROVE ARCHITECTURE again.";
+        var messages = new MemoryMessages();
+        if (alreadyApproved) messages.Items.Add(new ChatMessage { Role = MessageRole.Assistant, Sequence = 1, Content = diagram });
+        messages.Items.Add(new ChatMessage { Role = MessageRole.User, Sequence = 2,
+            Content = alreadyApproved ? "APPROVE ARCHITECTURE" : "Build an app" });
+        var texts = alreadyApproved ? new[] { repeated, "Inspecting existing source", "Source inspected" }
+            : new[] { premature, diagram + "\nReply APPROVE ARCHITECTURE" };
+        var handler = new ModelStreamHandler("", alreadyApproved ? 1 : 0, texts, toolStart: 2);
+        using var http = new HttpClient(handler);
+        var client = new ResponsesClient(new ApiKeyCredential("test-only"), new ResponsesClientOptions
+        { Endpoint = new Uri("https://model.test/v1"), Transport = new HttpClientPipelineTransport(http) });
+        var options = Options.Create(new AzureOpenAiOptions { Deployment = "test-model", MaxToolIterations = 4 });
+        var runs = new MemoryRuns();
+        var bus = new AgentEventBus();
+        using var subscription = bus.Subscribe("run-1");
+        var skills = new AgentSkillRegistry(new[] { new SoftwareFactorySkill() });
+        skills.TryLoad("run-1", "software-factory", out _);
+        var tool = new WorkspaceReadTool();
+        var runner = new AgentRunner(client, new ContextManager(client, options, NullLogger<ContextManager>.Instance),
+            messages, runs, bus, new ToolRegistry(new[] { tool }), skills, options, NullLogger<AgentRunner>.Instance);
+        await runner.RunAsync(new AgentRunRequest("run-1", "thread-1", "user-1"), CancellationToken.None);
+
+        Assert.Equal(RunStatus.Completed, runs.Run.Status);
+        Assert.Equal(alreadyApproved ? 1 : 0, tool.Calls);
+        Assert.Equal(alreadyApproved ? 3 : 2, handler.Calls);
+        var replies = messages.Items.Where(message => message.RunId == "run-1" && message.Role == MessageRole.Assistant).ToArray();
+        Assert.Equal(string.Empty, replies[0].Content);
+        Assert.DoesNotContain(replies, reply => reply.Content == premature || reply.Content == repeated);
+        if (!alreadyApproved) Assert.Contains(diagram, replies.Last().Content);
+        var events = new List<AgentEvent>();
+        await foreach (var entry in subscription.Reader.ReadAllAsync()) events.Add(entry);
+        Assert.DoesNotContain(events, entry => entry.Type == "delta");
+        Assert.DoesNotContain(events, entry => entry.Content == premature || entry.Content == repeated);
+        Assert.Contains("SERVER ARCHITECTURE HANDOFF", handler.LastRequest);
+        Assert.DoesNotContain(alreadyApproved ? repeated : premature, handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task ArchitectureHandoff_StopsAfterBoundedCorrectionsWithoutPublishingInvalidProposal()
+    {
+        var messages = new MemoryMessages();
+        messages.Items.Add(new ChatMessage { Role = MessageRole.User, Sequence = 1, Content = "Build an app" });
+        var handler = new ModelStreamHandler("APPROVE ARCHITECTURE");
+        using var http = new HttpClient(handler);
+        var client = new ResponsesClient(new ApiKeyCredential("test-only"), new ResponsesClientOptions
+        { Endpoint = new Uri("https://model.test/v1"), Transport = new HttpClientPipelineTransport(http) });
+        var options = Options.Create(new AzureOpenAiOptions { Deployment = "test-model", MaxToolIterations = 6 });
+        var skills = new AgentSkillRegistry(new[] { new SoftwareFactorySkill() });
+        skills.TryLoad("run-1", "software-factory", out _);
+        var runs = new MemoryRuns();
+        var runner = new AgentRunner(client, new ContextManager(client, options, NullLogger<ContextManager>.Instance),
+            messages, runs, new AgentEventBus(), new ToolRegistry(Array.Empty<IAgentTool>()), skills, options, NullLogger<AgentRunner>.Instance);
+        await runner.RunAsync(new AgentRunRequest("run-1", "thread-1", "user-1"), CancellationToken.None);
+        Assert.Equal(3, handler.Calls);
+        Assert.Equal(RunStatus.Failed, runs.Run.Status);
+        Assert.All(messages.Items.Where(message => message.Role == MessageRole.Assistant), reply => Assert.Empty(reply.Content));
+        Assert.Contains("two corrections", runs.Run.Error);
+    }
+
     private sealed class WorkspaceReadTool : IAgentTool
     {
         public string Name => "read_project_workspace";
@@ -150,7 +216,7 @@ public sealed class AgentDeploymentExecutionTests
         }
     }
 
-    private sealed class ModelStreamHandler(string text, int toolRounds = 0) : HttpMessageHandler
+    private sealed class ModelStreamHandler(string text, int toolRounds = 0, string[]? scriptedTexts = null, int toolStart = 1) : HttpMessageHandler
     {
         public int Calls { get; private set; }
         public string LastRequest { get; private set; } = "";
@@ -162,10 +228,10 @@ public sealed class AgentDeploymentExecutionTests
             var delta = JsonSerializer.Serialize(new
             {
                 type = "response.output_text.delta", sequence_number = 1, item_id = "message-1",
-                output_index = 0, content_index = 0, delta = text, logprobs = Array.Empty<object>()
+                output_index = 0, content_index = 0, delta = scriptedTexts is null ? text : scriptedTexts[Calls - 1], logprobs = Array.Empty<object>()
             });
             var completion = "";
-            if (Calls <= toolRounds)
+            if (Calls >= toolStart && Calls < toolStart + toolRounds)
             {
                 var completed = JsonSerializer.Serialize(new
                 {

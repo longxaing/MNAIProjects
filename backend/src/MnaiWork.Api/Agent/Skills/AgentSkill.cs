@@ -24,7 +24,7 @@ public sealed class SoftwareFactorySkill : IAgentSkill
         "Design premium, polished React interfaces with working ASP.NET Core backends using a mandatory " +
         "UI quality, code, test, Azure what-if, approval, and deployment workflow.";
 
-    public string Version => "1.4.2";
+    public string Version => "1.4.4";
     public string Category => "engineering";
 
     public IReadOnlySet<string> ToolNames { get; } = new HashSet<string>(

@@ -7,6 +7,29 @@ namespace MnaiWork.Api.Tests;
 
 public sealed class BuildEvidenceTests
 {
+    [Theory]
+    [InlineData("Respond in English and make the entire website English-language.", "APPROVE ARCHITECTURE", false)]
+    [InlineData("请使用英文回复，网站用中文。", "继续", false)]
+    [InlineData("请用中文回复，网站用英文。", "APPROVE UI", true)]
+    [InlineData("Reply in Chinese.", "CONTINUE REPAIR textblog", true)]
+    [InlineData("Build a friends-only blog.", "APPROVE ARCHITECTURE", false)]
+    [InlineData("帮我做一个博客。", "APPROVE ARCHITECTURE", true)]
+    [InlineData("Respond in Chinese.", "Please reply in English.", false)]
+    [InlineData("Respond in English.", "请使用中文回复", true)]
+    public void BlockingReply_RespectsUserLanguageAcrossApprovalTurns(string prompt, string nextMessage, bool chinese)
+    {
+        var history = History();
+        history.Insert(0, new ChatMessage { Role = MessageRole.User, Sequence = 0, Content = prompt });
+        history[2].ToolSucceeded = false;
+        history[2].Content = "HTTP 400: DefaultAzureCredential missing";
+        history.Add(new ChatMessage { Role = MessageRole.Assistant, Sequence = 3, Content = "请用中文回复" });
+        history.Add(new ChatMessage { Role = MessageRole.User, Sequence = 4, Content = nextMessage });
+        var reply = BuildEvidence.GetBlockingReply(history);
+        Assert.NotNull(reply);
+        Assert.StartsWith(chinese ? "项目 textblog" : "The current source for project textblog", reply);
+        Assert.Contains("HTTP 400: DefaultAzureCredential missing", reply);
+    }
+
     [Fact]
     public void FailureCannotBeOverriddenByAssistantSuccessClaim()
     {

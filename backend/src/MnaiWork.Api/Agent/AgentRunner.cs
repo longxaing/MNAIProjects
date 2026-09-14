@@ -136,6 +136,11 @@ public sealed class AgentRunner
                 ? SystemPrompts.Agent
                 : $"{SystemPrompts.Agent}\n\n## Summary of earlier conversation\n{prepared.Summary}";
             instructions = $"{instructions}\n\n{_skills.BuildCatalogPrompt()}";
+            var architectureApproved = ArchitectureHandoff.HasApprovedArchitecture(history);
+            var awaitingImplementation = architectureApproved;
+            var architectureCorrections = 0;
+            if (architectureApproved)
+                instructions += "\n\n" + ArchitectureHandoff.ImplementApproved;
             var persistedBuildBlocker = BuildEvidence.GetBlockingReply(history);
             if (persistedBuildBlocker is not null)
             {
@@ -197,6 +202,7 @@ public sealed class AgentRunner
                 ResponseResult? final = null;
                 var lastPersistedLength = 0;
                 var bufferBuildReply = buildWorkflowActive
+                    || ArchitectureHandoff.IsApprovalTurn(history)
                     || history.Any(message => message.Role == MessageRole.Tool && message.Artifacts.Any(artifact => artifact.Kind == ArtifactKind.SourceZip))
                     || _skills.IsToolAvailable(runId, "build_test_project");
 
@@ -236,6 +242,20 @@ public sealed class AgentRunner
                 }
                 if (calls.Any(call => call.FunctionName is "create_project_workspace" or "update_project_workspace" or "build_test_project"))
                     buildWorkflowActive = true;
+                var architectureCorrection = bufferBuildReply
+                    ? ArchitectureHandoff.GetCorrection(assistantText, architectureApproved, awaitingImplementation, calls.Count > 0)
+                    : null;
+                if (architectureCorrection is not null)
+                {
+                    assistant.Content = string.Empty;
+                    assistant.Streaming = false;
+                    await _messages.UpsertAsync(assistant, ct);
+                    Emit(new AgentEvent { Type = "message_done", MessageId = assistant.Id, Content = string.Empty });
+                    if (++architectureCorrections > 2)
+                        throw new InvalidOperationException("Architecture handoff could not be completed after two corrections. No new architecture approval was requested or inferred.");
+                    input.Add(ResponseItem.CreateUserMessageItem(architectureCorrection));
+                    continue;
+                }
                 blockedBuildReply = buildWorkflowActive
                     ? BuildEvidence.GetBlockingReply(await _messages.ListAsync(threadId, ct)) : null;
                 if (blockedBuildReply is not null)
@@ -275,6 +295,8 @@ public sealed class AgentRunner
                 {
                     var result = await ExecuteToolAsync(
                         call, threadId, userId, runId, seq++, input, Emit, ct);
+                    if (call.FunctionName is "create_project_workspace" or "update_project_workspace" or "read_project_workspace" or "build_test_project")
+                        awaitingImplementation = false;
                     if (result.Success && call.FunctionName is "create_project_workspace" or "update_project_workspace"
                         && screenshotInput is not null)
                     {

@@ -45,6 +45,9 @@ internal static class SystemPrompts
         - Before creating a project workspace, or before an edit that changes an architectural surface,
           render a Mermaid architecture proposal and end the turn. Continue only after the user sends
           exactly APPROVE ARCHITECTURE.
+          Never request approval for a diagram you only promise to show later. Show the complete diagram
+          before the approval request. After valid approval, call implementation tools in the same run;
+          do not redraw the unchanged proposal or ask for the same approval again.
           After asking for that exact approval, output nothing else: no technology choices, coding offer,
           alternative workflow, or additional next steps.
         - An approved architecture remains valid for later implementation-only changes. Styling, copy,

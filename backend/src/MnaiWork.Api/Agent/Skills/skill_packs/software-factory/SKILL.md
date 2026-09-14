@@ -1,7 +1,7 @@
 ---
 name: software-factory
 description: "Design polished, premium React interfaces with working ASP.NET Core backends, then test and deploy them. Use for application creation, UI design and refinement, unit/integration/E2E tests, fixed Azure infrastructure, and generated project publication."
-version: 1.4.2
+version: 1.4.4
 category: engineering
 author: MnaiWork
 ---
@@ -9,6 +9,9 @@ author: MnaiWork
 # Software Factory Skill
 
 Use this skill whenever the user asks to create, modify, test, or deploy a software project.
+
+Honor explicit reply language and website language independently, including status/UI/validation text.
+Approval turns and tool errors do not change that preference; preserve raw diagnostics and approval phrases.
 
 ## UI Quality Contract
 
@@ -42,11 +45,9 @@ Visual finish and working behavior are joint requirements; respect the user's br
 - Preserve styling during repairs. Check the React entry imports the stylesheet and built CSS/assets
   match the components (or CSS-in-JS styles apply). When browser inspection is available, check failed
   asset requests and computed styles; a CSS file in SourceZip alone does not prove it loaded.
-- New workspaces include styles.css and viewport metadata. Adapt these tokens, layout and component
-  styles to the product; do not retain the starter identity or delete styling during functional repairs.
-  The runner compares applied layout/control styles with an unstyled baseline on desktop and mobile.
-  Fix missing imports, ineffective selectors or viewport metadata when this gate fails; passing it is
-  not proof of premium design or complete visual coverage.
+- Adapt starter styles.css and viewport metadata to the product; preserve styling during repairs.
+  The runner compares layout/control styles with an unstyled baseline on both viewports. Fix imports,
+  selectors and viewport issues when it fails; passing is not proof of design quality.
 
 ### 3. Review evidence before handoff
 
@@ -110,8 +111,9 @@ Execute stages in order. Never report a later stage as complete unless its tool 
      Optional `subgraph ID["title"]` ends with `end`; use `<br/>` for label breaks, not literal `\n`.
      Avoid `&`, nested quotes, Markdown, directives, custom classes, icons, and experimental syntax.
      Verify referenced nodes exist and brackets and quotes are balanced; simplify uncertain diagrams.
-   - Ask for exact `APPROVE ARCHITECTURE`; do not create/update source or build/deploy in that turn.
-     End immediately after the approval request, with no alternate stack or extra choices.
+   - Show the complete diagram before requesting exact `APPROVE ARCHITECTURE`, never promise it later.
+     End immediately after the approval request; no source/build/deploy tools in that turn.
+     After valid approval, call implementation tools immediately; do not redraw or request approval again.
    - The approved Mermaid is pinned into later LLM context as the implementation contract. Do not silently
      change topology, identity, API, or data flow; use the Existing project iteration rules for changes.
 3. **Workspace after approval**
@@ -131,8 +133,7 @@ Execute stages in order. Never report a later stage as complete unless its tool 
 4. **Implementation**
    - Implement complete approved workflows, frontend/API/tests/styling together, not a developer API demo.
      Derive identity instead of exposing raw user IDs as UX; confirm destructive actions.
-   - Read template Program.cs before changing startup. Preserve health/readiness, manifests, CORS, and DI.
-     Never call invented helpers such as AddDefaultServices or UseDefaultPipeline without their implementations.
+   - Read template Program.cs first. Never call AddDefaultServices or UseDefaultPipeline without implementations.
    - Preserve `builder.Environment.IsDevelopment()` and interface-based business services:
 
      | Dependency | Development only | All other environments |
@@ -191,9 +192,13 @@ Execute stages in order. Never report a later stage as complete unless its tool 
      fixture endpoints to bypass them. This minimum gate is not full acceptance or Production verification.
 6. **Validation and repair**
    - **Mandatory pre-build code review:** Before the first build and after each repair revision, read the
-      actual latest SourceZip. Check API contracts, entry-point types, DI/environment selection, auth,
-      persistence, package references, test assertions/selectors, and styling together. Record inspected
-      paths and concrete findings; fix blockers and proceed to build. This is not another user approval gate.
+     actual latest SourceZip. Review API/auth/persistence, DI, entry points, packages, tests and styling;
+     record paths/findings, fix blockers and build. This is not another user approval gate.
+   - Compare startup with the template: preserve `new DefaultAzureCredential()`, all three Azure clients,
+     health/readiness/CORS/fingerprint handling, `GetBlobContainerClient`, `ReadContainerAsync`, and
+     `GetPropertiesOfSecretsAsync`. Verify Production method bodies: no NotImplementedException,
+     omitted implementations, unconditional mocks or wholesale startup rewrites. Fix source-contract
+     HTTP 400 errors in source; do not diagnose an API-key outage or resubmit unchanged code.
    - Call `build_test_project` for the complete restore/build, backend tests, Vitest/build, Playwright,
       screenshot, and publish pipeline. A source update or partial stage success is not a successful build.
    - Classify the latest BuildReport by failed stage and failure signature. Use `query` to locate unknown
