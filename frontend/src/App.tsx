@@ -5,6 +5,9 @@ import ChatView from "./components/ChatView";
 import Sidebar from "./components/Sidebar";
 import AgentAvatar from "./components/AgentAvatar";
 import { useChat } from "./store/chat";
+import { lazy, Suspense } from "react";
+
+const SharedConversationPage = lazy(() => import("./components/SharedConversationPage"));
 
 /** Register/refresh the user record on the backend. Best-effort; never blocks the app. */
 async function bootstrapUser(): Promise<void> {
@@ -16,6 +19,23 @@ async function bootstrapUser(): Promise<void> {
 }
 
 export default function App() {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  if (hash.startsWith("#/share/")) {
+    let threadId = "";
+    try { threadId = decodeURIComponent(hash.slice("#/share/".length)); } catch { threadId = ""; }
+    return <Suspense fallback={<div className="app-loading">Loading shared conversation...</div>}>
+      <SharedConversationPage key={threadId} threadId={threadId} />
+    </Suspense>;
+  }
+  return <PrivateWorkspace />;
+}
+
+function PrivateWorkspace() {
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(!authEnabled);
   const init = useChat((s) => s.init);

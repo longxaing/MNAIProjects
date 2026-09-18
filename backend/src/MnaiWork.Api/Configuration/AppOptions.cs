@@ -55,6 +55,7 @@ public sealed class CosmosOptions
     public string RunsContainer { get; set; } = "runs";
     public string UsersContainer { get; set; } = "users";
     public string DeploymentProfilesContainer { get; set; } = "deploymentProfiles";
+    public string SharesContainer { get; set; } = "conversationShares";
 }
 
 /// <summary>Azure Blob Storage settings for generated artifacts.</summary>

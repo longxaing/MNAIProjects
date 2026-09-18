@@ -97,7 +97,7 @@ never claim it passed or confuse sandbox tests with remote verification.
 Execute stages in order. Never report a later stage as complete unless its tool succeeded.
 
 0. **Runtime profile**
-   - Call `get_deployment_profile` and use the Cosmos-backed Azure/build settings it returns.
+   - Call `get_deployment_profile` and use the Cosmos-backed Azure/build settings it return
    - The tool is read-only. Users edit the profile through the authenticated profile API.
 
 1. **Requirements**
